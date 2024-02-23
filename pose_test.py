@@ -143,4 +143,3 @@ annotated_image = draw_landmarks_on_image(image.numpy_view(), detection_result, 
 while cv2.waitKey(1) < 0:
   cv2.imshow('', cv2.cvtColor(annotated_image, cv2.COLOR_RGB2BGR))
 
-
