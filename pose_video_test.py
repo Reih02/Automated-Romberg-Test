@@ -151,4 +151,3 @@ while cv2.waitKey(1) < 0:
 vid.release()
 cv2.destroyAllWindows()
 
-
