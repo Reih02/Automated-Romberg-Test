@@ -12,7 +12,7 @@ from filterpy.kalman import KalmanFilter
 import math
 
 
-video_path = 'captured_video/positive_diagnosis_clipped.mp4'
+video_path = 'captured_video/romberg_positive.mp4'
 vid = cv2.VideoCapture(video_path)
 
 body_parts = [
@@ -52,7 +52,7 @@ body_parts = [
 ]
 
 
-def draw_landmarks_on_image(rgb_image, detection_result, computed_cog, smoothed_cog, unbalanced, right_foot, left_foot):
+def draw_landmarks_on_image(rgb_image, detection_result, computed_cog, unbalanced, right_foot, left_foot, smoothed_pos_right):
   #print(f"COMPUTED COG IS : {computed_cog}")
   pose_landmarks_list = detection_result.pose_landmarks
   annotated_image = np.copy(rgb_image)
@@ -83,10 +83,13 @@ def draw_landmarks_on_image(rgb_image, detection_result, computed_cog, smoothed_
   cv2.line(annotated_image, (right_foot_x, right_foot_y), (x_pixel_location, y_pixel_location), (120, 0, 120), 2)
   cv2.line(annotated_image, (left_foot_x, left_foot_y), (x_pixel_location, y_pixel_location), (120, 0, 120), 2)
 
+  smoothed_right_x, smoothed_right_y = int(smoothed_pos_right[0] * width), int(smoothed_pos_right[1] * height)
+  cv2.circle(annotated_image, (smoothed_right_x, smoothed_right_y), 3, (0, 255, 0), 2)
+
   # draw smoothed COG
-  smooth_x_pixel_location = int(smoothed_cog[0] * width)
-  smooth_y_pixel_location = int(smoothed_cog[1] * height)
-  cv2.circle(annotated_image, (smooth_x_pixel_location, smooth_y_pixel_location), 15, (0, 0, 255), 2)
+  #smooth_x_pixel_location = int(smoothed_cog[0] * width)
+  #smooth_y_pixel_location = int(smoothed_cog[1] * height)
+  #cv2.circle(annotated_image, (smooth_x_pixel_location, smooth_y_pixel_location), 15, (0, 0, 255), 2)
 
   if unbalanced:
     cv2.circle(annotated_image, (50, 50), 5, (0, 0, 255), 5)
@@ -181,6 +184,35 @@ def calculate_weight_distribution(cog):
     # print(f"WEIGHT DISTRO LEFT: {left_ratio}")
 
     return (weight_distro_right, weight_distro_left, right_foot, left_foot)
+  
+def setup_kalman_r():
+  # Define Kalman Filter
+  kf = KalmanFilter(dim_x=4, dim_z=2)
+
+  # Initialize state transition matrix A
+  kf.F = np.array([[1, 0, 1, 0],
+                 [0, 1, 0, 1],
+                 [0, 0, 1, 0],
+                 [0, 0, 0, 1]])
+
+  # Initialize measurement function H
+  kf.H = np.array([[1, 0, 0, 0],
+                 [0, 1, 0, 0]])
+
+  # Initialize measurement noise covariance matrix
+  kf.R *= 100
+
+  # Initialize process noise covariance matrix
+  kf.Q = np.array([[0.1, 0,    0,    0],
+                 [0,    0.1, 0,    0],
+                 [0,    0,    0.3, 0],
+                 [0,    0,    0,    0.3]])
+  
+  kf.x = np.array([0., 0., 0., 0.])  # initial state (x, y, vx, vy)
+  kf.P = np.eye(4)                   # initial uncertainty
+
+  return kf
+
 
   
 
@@ -199,6 +231,8 @@ patient_was_unbalanced = False
 
 max_ratio_difference = 0
 
+kf_r = setup_kalman_r()
+
 # Load the input frames from the video.
 while cv2.waitKey(1) < 0:
   ret, frame = vid.read()
@@ -212,37 +246,44 @@ while cv2.waitKey(1) < 0:
 
   pose_landmarks_list = detection_result.pose_landmarks
 
-  with open('body_part_locations.txt', 'w') as file:
-    file.write("Locations (xyz) grouped by body part\n")
-    for i in range(0,len(pose_landmarks_list[0])):
-        current_body_part = body_parts[i]
-        current_landmark = pose_landmarks_list[0][i]
-        current_location = (current_landmark.x, current_landmark.y, current_landmark.z)
-        file.write(f"{current_body_part}: {current_location}\n")
+  if len(pose_landmarks_list) > 0:
+    with open('body_part_locations.txt', 'w') as file:
+      file.write("Locations (xyz) grouped by body part\n")
+      for i in range(0,len(pose_landmarks_list[0])):
+          current_body_part = body_parts[i]
+          current_landmark = pose_landmarks_list[0][i]
+          current_location = (current_landmark.x, current_landmark.y, current_landmark.z)
+          file.write(f"{current_body_part}: {current_location}\n")
 
-  computed_cog = compute_cog()
+    computed_cog = compute_cog()
 
-  smoothed_cog = data_smoother.smooth_data(computed_cog)
-  #print(f"RAW COG: {computed_cog[0], computed_cog[1]}")
-  #print(f"SMOOTH COG: {smoothed_cog[0], smoothed_cog[1]}")
+    #smoothed_cog = data_smoother.smooth_data(computed_cog)
+    #print(f"RAW COG: {computed_cog[0], computed_cog[1]}")
+    #print(f"SMOOTH COG: {smoothed_cog[0], smoothed_cog[1]}")
 
-  right_ratio, left_ratio, right_foot, left_foot = calculate_weight_distribution(computed_cog)
+    right_ratio, left_ratio, right_foot, left_foot = calculate_weight_distribution(computed_cog)
 
-  print(f"Weight distribution difference is: {abs(right_ratio - left_ratio)}%")
+    kf_r.predict()
+    kf_r.update(right_foot)
+    smoothed_pos_right = (kf_r.x[0], kf_r.x[1])
 
-  if abs(right_ratio - left_ratio) > max_ratio_difference:
-    max_ratio_difference = abs(right_ratio - left_ratio)
+    print(f"Weight distribution difference is: {abs(right_ratio - left_ratio)}%")
 
-  # check if subject is "unbalanced"
-  if abs(right_ratio - left_ratio) > 6:
-    print("###UNBALANCED###")
-    patient_was_unbalanced = True
-    unbalanced = True
-  else:
-    unbalanced = False
+    if abs(right_ratio - left_ratio) > max_ratio_difference:
+      max_ratio_difference = abs(right_ratio - left_ratio)
 
-  annotated_image = draw_landmarks_on_image(rgb_frame.numpy_view(), detection_result, computed_cog, smoothed_cog, unbalanced, right_foot, left_foot)
-  cv2.imshow('Frame', annotated_image)
+    # check if subject is "unbalanced"
+    if abs(right_ratio - left_ratio) > 6:
+      print("###UNBALANCED###")
+      patient_was_unbalanced = True
+      unbalanced = True
+    else:
+      unbalanced = False
+
+    #annotated_image = draw_landmarks_on_image(rgb_frame.numpy_view(), detection_result, computed_cog, smoothed_cog, unbalanced, right_foot, left_foot)
+    annotated_image = draw_landmarks_on_image(rgb_frame.numpy_view(), detection_result, computed_cog, unbalanced, right_foot, left_foot, smoothed_pos_right)
+    cv2.namedWindow("Output", cv2.WINDOW_NORMAL)
+    cv2.imshow("Output", annotated_image)
 
 vid.release()
 cv2.destroyAllWindows()
