@@ -12,7 +12,7 @@ from filterpy.kalman import KalmanFilter
 import math
 
 
-video_path = 'captured_video/romberg_positive.mp4'
+video_path = 'captured_video/positive_2.mp4'
 vid = cv2.VideoCapture(video_path)
 
 body_parts = [
@@ -52,7 +52,7 @@ body_parts = [
 ]
 
 
-def draw_landmarks_on_image(rgb_image, detection_result, computed_cog, unbalanced, right_foot, left_foot, smoothed_pos_right):
+def draw_landmarks_on_image(rgb_image, detection_result, computed_cog, unbalanced, right_foot, left_foot, smoothed_pos_right, smoothed_pos_left):
   #print(f"COMPUTED COG IS : {computed_cog}")
   pose_landmarks_list = detection_result.pose_landmarks
   annotated_image = np.copy(rgb_image)
@@ -77,14 +77,14 @@ def draw_landmarks_on_image(rgb_image, detection_result, computed_cog, unbalance
   y_pixel_location = int(computed_cog[1] * height)
   cv2.circle(annotated_image, (x_pixel_location, y_pixel_location), 10, (255, 0, 0), 2)
 
-  # draw lines between foot and COG
-  right_foot_x, right_foot_y = int(right_foot[0] * width), int(right_foot[1] * height)
-  left_foot_x, left_foot_y = int(left_foot[0] * width), int(left_foot[1] * height)
-  cv2.line(annotated_image, (right_foot_x, right_foot_y), (x_pixel_location, y_pixel_location), (120, 0, 120), 2)
-  cv2.line(annotated_image, (left_foot_x, left_foot_y), (x_pixel_location, y_pixel_location), (120, 0, 120), 2)
-
   smoothed_right_x, smoothed_right_y = int(smoothed_pos_right[0] * width), int(smoothed_pos_right[1] * height)
+  smoothed_left_x, smoothed_left_y = int(smoothed_pos_left[0] * width), int(smoothed_pos_left[1] * height)
   cv2.circle(annotated_image, (smoothed_right_x, smoothed_right_y), 3, (0, 255, 0), 2)
+  cv2.circle(annotated_image, (smoothed_left_x, smoothed_left_y), 3, (0, 255, 0), 2)
+
+  # draw lines between smoothed feed joint locations and COG
+  cv2.line(annotated_image, (smoothed_right_x, smoothed_right_y), (x_pixel_location, y_pixel_location), (0, 0, 255), 2)
+  cv2.line(annotated_image, (smoothed_left_x, smoothed_left_y), (x_pixel_location, y_pixel_location), (0, 0, 255), 2)
 
   # draw smoothed COG
   #smooth_x_pixel_location = int(smoothed_cog[0] * width)
@@ -157,21 +157,21 @@ class SmoothCOG:
   
 # Calculates how much relative weight is stored on each foot based on pose geometry and
 # calculated centre of mass
-def calculate_weight_distribution(cog):
-  with open('body_part_locations.txt', 'r') as file:
-    lines = file.readlines()[-2:]
-    joint_locations = []
-    for line in lines:
-        parts = line.split(':')
-        body_part = parts[0].strip()
-        location_str = parts[1].strip()
-        coordinates = location_str[1:-1].split(',')
-        coordinates = tuple(float(coord.strip()) for coord in coordinates)
-        joint_locations.append(coordinates[0:2])
+def calculate_weight_distribution(cog, smoothed_pos_right, smoothed_pos_left):
+  # with open('body_part_locations.txt', 'r') as file:
+  #   lines = file.readlines()[-2:]
+  #   joint_locations = []
+  #   for line in lines:
+  #       parts = line.split(':')
+  #       body_part = parts[0].strip()
+  #       location_str = parts[1].strip()
+  #       coordinates = location_str[1:-1].split(',')
+  #       coordinates = tuple(float(coord.strip()) for coord in coordinates)
+  #       joint_locations.append(coordinates[0:2])
 
-    right_foot, left_foot = joint_locations[0], joint_locations[1]
-    distance_right_foot = math.sqrt((right_foot[0] - cog[0])**2 + (right_foot[1] - cog[1])**2)
-    distance_left_foot = math.sqrt((left_foot[0] - cog[0])**2 + (left_foot[1] - cog[1])**2)
+  #   right_foot, left_foot = joint_locations[0], joint_locations[1]
+    distance_right_foot = math.sqrt((smoothed_pos_right[0] - cog[0])**2 + (smoothed_pos_right[1] - cog[1])**2)
+    distance_left_foot = math.sqrt((smoothed_pos_left[0] - cog[0])**2 + (smoothed_pos_left[1] - cog[1])**2)
 
     weight_distro_right = (1 / distance_right_foot) * (1 / (distance_right_foot + distance_left_foot)) * 100
     weight_distro_left = (1 / distance_left_foot) * (1 / (distance_right_foot + distance_left_foot)) * 100
@@ -185,7 +185,7 @@ def calculate_weight_distribution(cog):
 
     return (weight_distro_right, weight_distro_left, right_foot, left_foot)
   
-def setup_kalman_r():
+def setup_kalman():
   # Define Kalman Filter
   kf = KalmanFilter(dim_x=4, dim_z=2)
 
@@ -200,13 +200,13 @@ def setup_kalman_r():
                  [0, 1, 0, 0]])
 
   # Initialize measurement noise covariance matrix
-  kf.R *= 100
+  kf.R *= 50
 
   # Initialize process noise covariance matrix
   kf.Q = np.array([[0.1, 0,    0,    0],
                  [0,    0.1, 0,    0],
-                 [0,    0,    0.3, 0],
-                 [0,    0,    0,    0.3]])
+                 [0,    0,    0.01, 0],
+                 [0,    0,    0,    0.01]])
   
   kf.x = np.array([0., 0., 0., 0.])  # initial state (x, y, vx, vy)
   kf.P = np.eye(4)                   # initial uncertainty
@@ -231,13 +231,21 @@ patient_was_unbalanced = False
 
 max_ratio_difference = 0
 
-kf_r = setup_kalman_r()
+# setup two kalman filters (one for each foot) in order to smooth joint tracking
+# prevents false positives due to jittery predictions from pose estimation model
+kf_r = setup_kalman()
+kf_l = setup_kalman()
 
+# for detecting unbalance for a sustained period of time
+unbalanced_frame_counter = 0
+frame_counter = 0
 # Load the input frames from the video.
 while cv2.waitKey(1) < 0:
   ret, frame = vid.read()
   if not ret:
     break
+
+  frame_counter += 1
   
   rgb_frame = mp.Image(image_format=mp.ImageFormat.SRGB, data=frame) # convert video frame to mp.Image type 
                                                                      # for processing in pose detector
@@ -261,27 +269,48 @@ while cv2.waitKey(1) < 0:
     #print(f"RAW COG: {computed_cog[0], computed_cog[1]}")
     #print(f"SMOOTH COG: {smoothed_cog[0], smoothed_cog[1]}")
 
-    right_ratio, left_ratio, right_foot, left_foot = calculate_weight_distribution(computed_cog)
+    with open('body_part_locations.txt', 'r') as file:
+      lines = file.readlines()[-2:]
+      joint_locations = []
+      for line in lines:
+          parts = line.split(':')
+          body_part = parts[0].strip()
+          location_str = parts[1].strip()
+          coordinates = location_str[1:-1].split(',')
+          coordinates = tuple(float(coord.strip()) for coord in coordinates)
+          joint_locations.append(coordinates[0:2])
+
+    right_foot, left_foot = joint_locations[0], joint_locations[1]
 
     kf_r.predict()
+    kf_l.predict()
+
     kf_r.update(right_foot)
+    kf_l.update(left_foot)
+
     smoothed_pos_right = (kf_r.x[0], kf_r.x[1])
+    smoothed_pos_left = (kf_l.x[0], kf_l.x[1])
+
+    right_ratio, left_ratio, right_foot, left_foot = calculate_weight_distribution(computed_cog, smoothed_pos_right, smoothed_pos_left)
 
     print(f"Weight distribution difference is: {abs(right_ratio - left_ratio)}%")
 
     if abs(right_ratio - left_ratio) > max_ratio_difference:
       max_ratio_difference = abs(right_ratio - left_ratio)
 
-    # check if subject is "unbalanced"
-    if abs(right_ratio - left_ratio) > 6:
-      print("###UNBALANCED###")
-      patient_was_unbalanced = True
-      unbalanced = True
+    # check if subject is "unbalanced" (ignore first 35 frames because of kalman filter initialisation)
+    if abs(right_ratio - left_ratio) > 6 and frame_counter >= 35:
+      unbalanced_frame_counter += 1
+      if unbalanced_frame_counter >= 5:
+        print("###UNBALANCED###")
+        patient_was_unbalanced = True
+        unbalanced = True
     else:
+      unbalanced_frame_counter = 0
       unbalanced = False
 
     #annotated_image = draw_landmarks_on_image(rgb_frame.numpy_view(), detection_result, computed_cog, smoothed_cog, unbalanced, right_foot, left_foot)
-    annotated_image = draw_landmarks_on_image(rgb_frame.numpy_view(), detection_result, computed_cog, unbalanced, right_foot, left_foot, smoothed_pos_right)
+    annotated_image = draw_landmarks_on_image(rgb_frame.numpy_view(), detection_result, computed_cog, unbalanced, right_foot, left_foot, smoothed_pos_right, smoothed_pos_left)
     cv2.namedWindow("Output", cv2.WINDOW_NORMAL)
     cv2.imshow("Output", annotated_image)
 
