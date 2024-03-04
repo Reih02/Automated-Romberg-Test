@@ -12,7 +12,7 @@ from filterpy.kalman import KalmanFilter
 import math
 
 
-video_path = 'captured_video/positive_2.mp4'
+video_path = 'captured_video/my_vid.MOV'
 vid = cv2.VideoCapture(video_path)
 
 body_parts = [
@@ -53,10 +53,8 @@ body_parts = [
 
 
 def draw_landmarks_on_image(rgb_image, detection_result, computed_cog, unbalanced, right_foot, left_foot, smoothed_pos_right, smoothed_pos_left):
-  #print(f"COMPUTED COG IS : {computed_cog}")
   pose_landmarks_list = detection_result.pose_landmarks
   annotated_image = np.copy(rgb_image)
-  #print(pose_landmarks_list[0])
   # Loop through the detected poses to visualize.
   for idx in range(len(pose_landmarks_list)):
     pose_landmarks = pose_landmarks_list[idx]
@@ -200,7 +198,7 @@ def setup_kalman():
                  [0, 1, 0, 0]])
 
   # Initialize measurement noise covariance matrix
-  kf.R *= 50
+  kf.R *= 35
 
   # Initialize process noise covariance matrix
   kf.Q = np.array([[0.1, 0,    0,    0],
@@ -265,7 +263,7 @@ while cv2.waitKey(1) < 0:
 
     computed_cog = compute_cog()
 
-    #smoothed_cog = data_smoother.smooth_data(computed_cog)
+    smoothed_cog = data_smoother.smooth_data(computed_cog)
     #print(f"RAW COG: {computed_cog[0], computed_cog[1]}")
     #print(f"SMOOTH COG: {smoothed_cog[0], smoothed_cog[1]}")
 
@@ -291,7 +289,7 @@ while cv2.waitKey(1) < 0:
     smoothed_pos_right = (kf_r.x[0], kf_r.x[1])
     smoothed_pos_left = (kf_l.x[0], kf_l.x[1])
 
-    right_ratio, left_ratio, right_foot, left_foot = calculate_weight_distribution(computed_cog, smoothed_pos_right, smoothed_pos_left)
+    right_ratio, left_ratio, right_foot, left_foot = calculate_weight_distribution(smoothed_cog, smoothed_pos_right, smoothed_pos_left)
 
     print(f"Weight distribution difference is: {abs(right_ratio - left_ratio)}%")
 
@@ -310,7 +308,7 @@ while cv2.waitKey(1) < 0:
       unbalanced = False
 
     #annotated_image = draw_landmarks_on_image(rgb_frame.numpy_view(), detection_result, computed_cog, smoothed_cog, unbalanced, right_foot, left_foot)
-    annotated_image = draw_landmarks_on_image(rgb_frame.numpy_view(), detection_result, computed_cog, unbalanced, right_foot, left_foot, smoothed_pos_right, smoothed_pos_left)
+    annotated_image = draw_landmarks_on_image(rgb_frame.numpy_view(), detection_result, smoothed_cog, unbalanced, right_foot, left_foot, smoothed_pos_right, smoothed_pos_left)
     cv2.namedWindow("Output", cv2.WINDOW_NORMAL)
     cv2.imshow("Output", annotated_image)
 
