@@ -156,30 +156,11 @@ class SmoothCOG:
 # Calculates how much relative weight is stored on each foot based on pose geometry and
 # calculated centre of mass
 def calculate_weight_distribution(cog, smoothed_pos_right, smoothed_pos_left):
-  # with open('body_part_locations.txt', 'r') as file:
-  #   lines = file.readlines()[-2:]
-  #   joint_locations = []
-  #   for line in lines:
-  #       parts = line.split(':')
-  #       body_part = parts[0].strip()
-  #       location_str = parts[1].strip()
-  #       coordinates = location_str[1:-1].split(',')
-  #       coordinates = tuple(float(coord.strip()) for coord in coordinates)
-  #       joint_locations.append(coordinates[0:2])
-
-  #   right_foot, left_foot = joint_locations[0], joint_locations[1]
     distance_right_foot = math.sqrt((smoothed_pos_right[0] - cog[0])**2 + (smoothed_pos_right[1] - cog[1])**2)
     distance_left_foot = math.sqrt((smoothed_pos_left[0] - cog[0])**2 + (smoothed_pos_left[1] - cog[1])**2)
 
     weight_distro_right = (1 / distance_right_foot) * (1 / (distance_right_foot + distance_left_foot)) * 100
     weight_distro_left = (1 / distance_left_foot) * (1 / (distance_right_foot + distance_left_foot)) * 100
-
-    # normalise vals
-    #right_ratio = distance_right_foot / (distance_left_foot + distance_right_foot)
-    #left_ratio = distance_left_foot / (distance_left_foot + distance_right_foot)
-
-    # print(f"WEIGHT DISTRO RIGHT: {right_ratio}")
-    # print(f"WEIGHT DISTRO LEFT: {left_ratio}")
 
     return (weight_distro_right, weight_distro_left, right_foot, left_foot)
   
@@ -198,7 +179,7 @@ def setup_kalman():
                  [0, 1, 0, 0]])
 
   # Initialize measurement noise covariance matrix
-  kf.R *= 35
+  kf.R *= 10
 
   # Initialize process noise covariance matrix
   kf.Q = np.array([[0.1, 0,    0,    0],
@@ -245,9 +226,13 @@ while cv2.waitKey(1) < 0:
 
   frame_counter += 1
   
-  rgb_frame = mp.Image(image_format=mp.ImageFormat.SRGB, data=frame) # convert video frame to mp.Image type 
+  kernel = (5, 5) # for use in gaussian blur
+  blurred_frame = cv2.GaussianBlur(frame, kernel, 0)
+
+  rgb_frame = mp.Image(image_format=mp.ImageFormat.SRGB, data=blurred_frame) # convert video frame to mp.Image type 
                                                                      # for processing in pose detector
   
+  #rgb_frame = mp.Image(image_format=mp.ImageFormat.SRGB, data=frame)
   detection_result = detector.detect(rgb_frame)
 
   pose_landmarks_list = detection_result.pose_landmarks
@@ -264,8 +249,6 @@ while cv2.waitKey(1) < 0:
     computed_cog = compute_cog()
 
     smoothed_cog = data_smoother.smooth_data(computed_cog)
-    #print(f"RAW COG: {computed_cog[0], computed_cog[1]}")
-    #print(f"SMOOTH COG: {smoothed_cog[0], smoothed_cog[1]}")
 
     with open('body_part_locations.txt', 'r') as file:
       lines = file.readlines()[-2:]
@@ -299,7 +282,7 @@ while cv2.waitKey(1) < 0:
     # check if subject is "unbalanced" (ignore first 35 frames because of kalman filter initialisation)
     if abs(right_ratio - left_ratio) > 6 and frame_counter >= 35:
       unbalanced_frame_counter += 1
-      if unbalanced_frame_counter >= 5:
+      if unbalanced_frame_counter >= 8: # wait for 8 consistent frames to declare unbalanced (due to jitters in pose estimation model)
         print("###UNBALANCED###")
         patient_was_unbalanced = True
         unbalanced = True
