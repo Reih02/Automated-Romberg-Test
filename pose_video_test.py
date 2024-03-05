@@ -12,7 +12,7 @@ from filterpy.kalman import KalmanFilter
 import math
 
 
-video_path = 'captured_video/my_vid.MOV'
+video_path = 'captured_video/negative_1.mp4'
 vid = cv2.VideoCapture(video_path)
 
 body_parts = [
@@ -179,15 +179,17 @@ def setup_kalman():
                  [0, 1, 0, 0]])
 
   # Initialize measurement noise covariance matrix
-  kf.R *= 10
+  # represents uncertainty in measurements
+  kf.R *= 30
 
-  # Initialize process noise covariance matrix
-  kf.Q = np.array([[0.1, 0,    0,    0],
-                 [0,    0.1, 0,    0],
-                 [0,    0,    0.01, 0],
-                 [0,    0,    0,    0.01]])
+  # Initialize process noise covariance matrix 
+  # represents the uncertainty in the system dynamics
+  kf.Q = np.array([[0.01, 0,    0,    0],
+                 [0,    0.01, 0,    0],
+                 [0,    0,    0.03, 0],
+                 [0,    0,    0,    0.03]])
   
-  kf.x = np.array([0., 0., 0., 0.])  # initial state (x, y, vx, vy)
+  kf.x = np.array([0.5, 0.75, 0., 0.])  # initial state (x, y, vx, vy)
   kf.P = np.eye(4)                   # initial uncertainty
 
   return kf
@@ -301,4 +303,3 @@ cv2.destroyAllWindows()
 print(f"Max ratio difference: {max_ratio_difference}")
 
 print(f"Diagnosis: {patient_was_unbalanced}")
-
