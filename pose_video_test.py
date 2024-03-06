@@ -12,7 +12,7 @@ from filterpy.kalman import KalmanFilter
 import math
 
 
-video_path = 'captured_video/my_vid.MOV'
+video_path = 'captured_video/positive_3.mp4'
 vid = cv2.VideoCapture(video_path)
 
 body_parts = [
