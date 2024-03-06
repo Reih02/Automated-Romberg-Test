@@ -12,7 +12,7 @@ from filterpy.kalman import KalmanFilter
 import math
 
 
-video_path = 'captured_video/negative_1.mp4'
+video_path = 'captured_video/my_vid.MOV'
 vid = cv2.VideoCapture(video_path)
 
 body_parts = [
@@ -156,13 +156,16 @@ class SmoothCOG:
 # Calculates how much relative weight is stored on each foot based on pose geometry and
 # calculated centre of mass
 def calculate_weight_distribution(cog, smoothed_pos_right, smoothed_pos_left):
-    distance_right_foot = math.sqrt((smoothed_pos_right[0] - cog[0])**2 + (smoothed_pos_right[1] - cog[1])**2)
-    distance_left_foot = math.sqrt((smoothed_pos_left[0] - cog[0])**2 + (smoothed_pos_left[1] - cog[1])**2)
+    
+    # used in order to avoid janky pose estimation changing the height of foot joint unexpectedly - triggering false positive
+    average_y_coord = (smoothed_pos_right[1] + smoothed_pos_left[1]) / 2
+
+    distance_right_foot = math.sqrt((smoothed_pos_right[0] - cog[0])**2 + (average_y_coord - cog[1])**2)
+    distance_left_foot = math.sqrt((smoothed_pos_left[0] - cog[0])**2 + (average_y_coord - cog[1])**2)
 
     weight_distro_right = (1 / distance_right_foot) * (1 / (distance_right_foot + distance_left_foot)) * 100
     weight_distro_left = (1 / distance_left_foot) * (1 / (distance_right_foot + distance_left_foot)) * 100
-
-    return (weight_distro_right, weight_distro_left, right_foot, left_foot)
+    return (weight_distro_right, weight_distro_left)
   
 def setup_kalman():
   # Define Kalman Filter
@@ -180,7 +183,7 @@ def setup_kalman():
 
   # Initialize measurement noise covariance matrix
   # represents uncertainty in measurements
-  kf.R *= 30
+  kf.R *= 70
 
   # Initialize process noise covariance matrix 
   # represents the uncertainty in the system dynamics
@@ -205,7 +208,7 @@ options = vision.PoseLandmarkerOptions(
 detector = vision.PoseLandmarker.create_from_options(options)
   
 # Init COG smoother class with defined alpha val
-alpha = 0.5
+alpha = 0.9
 data_smoother = SmoothCOG(alpha)
 
 patient_was_unbalanced = False
@@ -217,8 +220,6 @@ max_ratio_difference = 0
 kf_r = setup_kalman()
 kf_l = setup_kalman()
 
-# for detecting unbalance for a sustained period of time
-unbalanced_frame_counter = 0
 frame_counter = 0
 # Load the input frames from the video.
 while cv2.waitKey(1) < 0:
@@ -250,7 +251,8 @@ while cv2.waitKey(1) < 0:
 
     computed_cog = compute_cog()
 
-    smoothed_cog = data_smoother.smooth_data(computed_cog)
+    #smoothed_cog = data_smoother.smooth_data(computed_cog)
+    smoothed_cog = computed_cog
 
     with open('body_part_locations.txt', 'r') as file:
       lines = file.readlines()[-2:]
@@ -274,17 +276,15 @@ while cv2.waitKey(1) < 0:
     smoothed_pos_right = (kf_r.x[0], kf_r.x[1])
     smoothed_pos_left = (kf_l.x[0], kf_l.x[1])
 
-    right_ratio, left_ratio, right_foot, left_foot = calculate_weight_distribution(smoothed_cog, smoothed_pos_right, smoothed_pos_left)
+    right_ratio, left_ratio = calculate_weight_distribution(smoothed_cog, smoothed_pos_right, smoothed_pos_left)
 
-    print(f"Weight distribution difference is: {abs(right_ratio - left_ratio)}%")
+    print(f"Weight distribution difference is: {round(abs(right_ratio - left_ratio), 2)}%")
 
     if abs(right_ratio - left_ratio) > max_ratio_difference:
       max_ratio_difference = abs(right_ratio - left_ratio)
 
-    # check if subject is "unbalanced" (ignore first 35 frames because of kalman filter initialisation)
-    if abs(right_ratio - left_ratio) > 6 and frame_counter >= 35:
-      unbalanced_frame_counter += 1
-      if unbalanced_frame_counter >= 8: # wait for 8 consistent frames to declare unbalanced (due to jitters in pose estimation model)
+    # check if subject is "unbalanced" (ignore first 10 frames because of kalman filter initialisation)
+    if abs(right_ratio - left_ratio) > 6 and frame_counter >= 10:
         print("###UNBALANCED###")
         patient_was_unbalanced = True
         unbalanced = True
