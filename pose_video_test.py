@@ -12,10 +12,10 @@ from filterpy.kalman import KalmanFilter
 import math
 
 
-video_path = 'captured_video/balance.MOV'
-other_vid = 'captured_video/weight.MOV'
+video_path = 'captured_video/my_vid.MOV'
+#other_vid = 'captured_video/weight.MOV'
 vid = cv2.VideoCapture(video_path)
-vid2 = cv2.VideoCapture(other_vid)
+#vid2 = cv2.VideoCapture(other_vid)
 
 body_parts = [
     'nose',
@@ -157,17 +157,37 @@ class SmoothCOG:
   
 # Calculates how much relative weight is stored on each foot based on pose geometry and
 # calculated centre of mass
-def calculate_weight_distribution(cog, smoothed_pos_right, smoothed_pos_left):
+# https://physics.stackexchange.com/questions/805853/is-it-possible-to-calculate-the-weight-distribution-on-each-foot-from-the-centre/805861#805861
+def calculate_weight_distribution(rgb_image, cog, smoothed_pos_right, smoothed_pos_left):
     
     # used in order to avoid janky pose estimation changing the height of foot joint unexpectedly - triggering false positive
-    average_y_coord = (smoothed_pos_right[1] + smoothed_pos_left[1]) / 2
+    #average_y_coord = (smoothed_pos_right[1] + smoothed_pos_left[1]) / 2
 
-    distance_right_foot = math.sqrt((smoothed_pos_right[0] - cog[0])**2 + (average_y_coord - cog[1])**2)
-    distance_left_foot = math.sqrt((smoothed_pos_left[0] - cog[0])**2 + (average_y_coord - cog[1])**2)
+    # distance_right_foot = math.sqrt((smoothed_pos_right[0] - cog[0])**2 + (average_y_coord - cog[1])**2)
+    # distance_left_foot = math.sqrt((smoothed_pos_left[0] - cog[0])**2 + (average_y_coord - cog[1])**2)
 
-    weight_distro_right = (1 / distance_right_foot) * (1 / (distance_right_foot + distance_left_foot)) * 100
-    weight_distro_left = (1 / distance_left_foot) * (1 / (distance_right_foot + distance_left_foot)) * 100
-    return (weight_distro_right, weight_distro_left)
+    # weight_distro_right = (1 / distance_right_foot) * (1 / (distance_right_foot + distance_left_foot)) * 100
+    # weight_distro_left = (1 / distance_left_foot) * (1 / (distance_right_foot + distance_left_foot)) * 100
+
+    image = np.copy(rgb_image)
+    _, width, _ = image.shape
+
+    x_right = smoothed_pos_right[0]
+    x_left = smoothed_pos_left[0]
+
+    cog_x = cog[0]
+
+    x_right = int(x_right * width)
+    x_left = int(x_left * width)
+    cog_x = int(cog_x * width)
+    
+    x_1 = math.sqrt((x_right - cog_x) ** 2)
+    x_2 = math.sqrt((x_left - cog_x) ** 2)
+
+    N_1 = (85 * 9.81 * x_2 / (x_1 + x_2)) / 100
+    N_2 = (85 * 9.81 * x_1 / (x_1 + x_2)) / 100
+
+    return (N_1, N_2)
   
 def setup_kalman():
   # Define Kalman Filter
@@ -226,7 +246,7 @@ frame_counter = 0
 # Load the input frames from the video.
 while cv2.waitKey(1) < 0:
   ret, frame = vid.read()
-  ret2, frame2 = vid2.read()
+  #ret2, frame2 = vid2.read()
   if not ret:
     break
 
@@ -268,7 +288,7 @@ while cv2.waitKey(1) < 0:
           coordinates = tuple(float(coord.strip()) for coord in coordinates)
           joint_locations.append(coordinates[0:2])
 
-    right_foot, left_foot = joint_locations[0], joint_locations[1]
+    left_foot, right_foot = joint_locations[0], joint_locations[1]
 
     kf_r.predict()
     kf_l.predict()
@@ -279,7 +299,7 @@ while cv2.waitKey(1) < 0:
     smoothed_pos_right = (kf_r.x[0], kf_r.x[1])
     smoothed_pos_left = (kf_l.x[0], kf_l.x[1])
 
-    right_ratio, left_ratio = calculate_weight_distribution(smoothed_cog, smoothed_pos_right, smoothed_pos_left)
+    right_ratio, left_ratio = calculate_weight_distribution(rgb_frame.numpy_view(), smoothed_cog, smoothed_pos_right, smoothed_pos_left)
 
     print(f"Weight distribution difference is: {round(abs(right_ratio - left_ratio), 2)}%")
 
@@ -298,10 +318,10 @@ while cv2.waitKey(1) < 0:
     #annotated_image = draw_landmarks_on_image(rgb_frame.numpy_view(), detection_result, computed_cog, smoothed_cog, unbalanced, right_foot, left_foot)
     annotated_image = draw_landmarks_on_image(rgb_frame.numpy_view(), detection_result, smoothed_cog, unbalanced, right_foot, left_foot, smoothed_pos_right, smoothed_pos_left)
     cv2.namedWindow("Output", cv2.WINDOW_NORMAL)
-    cv2.namedWindow("Output2", cv2.WINDOW_NORMAL)
+    #cv2.namedWindow("Output2", cv2.WINDOW_NORMAL)
     cv2.imshow("Output", annotated_image)
-    cv2.imshow("Output2", frame2)
-    print(f"FRAME: {frame_counter}")
+    #cv2.imshow("Output2", frame2)
+    #print(f"FRAME: {frame_counter}")
 
 vid.release()
 cv2.destroyAllWindows()
