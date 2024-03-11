@@ -11,11 +11,10 @@ from mediapipe.tasks.python import vision
 from filterpy.kalman import KalmanFilter
 import math
 
+WEIGHT = 85
 
-video_path = 'captured_video/balance.MOV'
-other_vid = 'captured_video/weight.MOV'
+video_path = 'captured_video/my_vid.MOV'
 vid = cv2.VideoCapture(video_path)
-vid2 = cv2.VideoCapture(other_vid)
 
 body_parts = [
     'nose',
@@ -102,7 +101,8 @@ def draw_landmarks_on_image(rgb_image, detection_result, computed_cog, unbalance
 def compute_cog():
   
   x_centre = 0
-  y_centre = 0  
+  y_centre = 0
+  z_centre = 0
 
   # hard-coded anatomically accurate joint weights w/ normalisation for use in later calculation
   weights = {'head': 0.0681/0.5336, 'UPT': 0.1571/0.5336, 'upper_arm': 0.0263/0.5336,
@@ -132,10 +132,12 @@ def compute_cog():
          current_bodypart = bodyparts_classifications[joint_locations[i][0]]
          x_centre += (weights[current_bodypart] * joint_locations[i][1][0])
          y_centre += (weights[current_bodypart] * joint_locations[i][1][1])
+         z_centre += (weights[current_bodypart] * joint_locations[i][1][2])
          used_joints += weights[current_bodypart]
     x_centre /= used_joints
     y_centre /= used_joints
-    return (x_centre, y_centre)
+    z_centre /= used_joints
+    return (x_centre, y_centre, z_centre)
   
 class SmoothCOG:
   def __init__(self, alpha):
@@ -161,6 +163,7 @@ def calculate_weight_distribution(cog, smoothed_pos_right, smoothed_pos_left):
     
     # used in order to avoid janky pose estimation changing the height of foot joint unexpectedly - triggering false positive
     average_y_coord = (smoothed_pos_right[1] + smoothed_pos_left[1]) / 2
+    average_z_coord = (smoothed_pos_right[2] + smoothed_pos_left[2]) / 2
 
     distance_right_foot = math.sqrt((smoothed_pos_right[0] - cog[0])**2 + (average_y_coord - cog[1])**2)
     distance_left_foot = math.sqrt((smoothed_pos_left[0] - cog[0])**2 + (average_y_coord - cog[1])**2)
@@ -171,17 +174,20 @@ def calculate_weight_distribution(cog, smoothed_pos_right, smoothed_pos_left):
   
 def setup_kalman():
   # Define Kalman Filter
-  kf = KalmanFilter(dim_x=4, dim_z=2)
+  kf = KalmanFilter(dim_x=4, dim_z=3)
 
   # Initialize state transition matrix A
-  kf.F = np.array([[1, 0, 1, 0],
-                 [0, 1, 0, 1],
-                 [0, 0, 1, 0],
-                 [0, 0, 0, 1]])
+  kf.F = np.array([[1, 0, 0, 1, 0, 0],
+                 [0, 1, 0, 0, 1, 0],
+                 [0, 0, 1, 0, 0, 1],
+                 [0, 0, 0, 1, 0, 0],
+                 [0, 0, 0, 0, 1, 0],
+                 [0, 0, 0, 0, 0, 1]])
 
   # Initialize measurement function H
-  kf.H = np.array([[1, 0, 0, 0],
-                 [0, 1, 0, 0]])
+  kf.H = np.array([[1, 0, 0, 0, 0, 0],
+                 [0, 1, 0, 0, 0, 0],
+                 [0, 0, 1, 0, 0, 0]])
 
   # Initialize measurement noise covariance matrix
   # represents uncertainty in measurements
@@ -189,13 +195,16 @@ def setup_kalman():
 
   # Initialize process noise covariance matrix 
   # represents the uncertainty in the system dynamics
-  kf.Q = np.array([[0.01, 0,    0,    0],
-                 [0,    0.01, 0,    0],
-                 [0,    0,    0.03, 0],
-                 [0,    0,    0,    0.03]])
+  kf.Q = np.array([[0.01, 0,    0,    0,    0,    0],
+                 [0,    0.01, 0,    0,    0,    0],
+                 [0,    0,    0.01, 0,    0,    0],
+                 [0,    0,    0,    0.03, 0,    0],
+                 [0,    0,    0,    0,    0.03, 0],
+                 [0,    0,    0,    0,    0,    0.03]])
   
-  kf.x = np.array([0.5, 0.75, 0., 0.])  # initial state (x, y, vx, vy)
-  kf.P = np.eye(4)                   # initial uncertainty
+  kf.x = np.array([0.5, 0.75, 0., 0., 0., 0.])  # initial state (x, y, z, vx, vy, vz)
+  kf.P = np.eye(6)                              # initial uncertainty
+  kf._I = np.eye(6)
 
   return kf
 
@@ -226,7 +235,6 @@ frame_counter = 0
 # Load the input frames from the video.
 while cv2.waitKey(1) < 0:
   ret, frame = vid.read()
-  ret2, frame2 = vid2.read()
   if not ret:
     break
 
@@ -266,18 +274,20 @@ while cv2.waitKey(1) < 0:
           location_str = parts[1].strip()
           coordinates = location_str[1:-1].split(',')
           coordinates = tuple(float(coord.strip()) for coord in coordinates)
-          joint_locations.append(coordinates[0:2])
+          joint_locations.append(coordinates[0:3])
 
     right_foot, left_foot = joint_locations[0], joint_locations[1]
 
+
+    # retrieve updated positions from kalman filters
     kf_r.predict()
     kf_l.predict()
 
     kf_r.update(right_foot)
     kf_l.update(left_foot)
 
-    smoothed_pos_right = (kf_r.x[0], kf_r.x[1])
-    smoothed_pos_left = (kf_l.x[0], kf_l.x[1])
+    smoothed_pos_right = (kf_r.x[0], kf_r.x[1], kf_r.x[2])
+    smoothed_pos_left = (kf_l.x[0], kf_l.x[1], kf_l.x[2])
 
     right_ratio, left_ratio = calculate_weight_distribution(smoothed_cog, smoothed_pos_right, smoothed_pos_left)
 
@@ -286,8 +296,8 @@ while cv2.waitKey(1) < 0:
     if abs(right_ratio - left_ratio) > max_ratio_difference:
       max_ratio_difference = abs(right_ratio - left_ratio)
 
-    # check if subject is "unbalanced" (ignore first 10 frames because of kalman filter initialisation)
-    if abs(right_ratio - left_ratio) > 6 and frame_counter >= 10:
+    # check if subject is "unbalanced" (ignore first 20 frames because of kalman filter initialisation)
+    if abs(right_ratio - left_ratio) > 6 and frame_counter >= 20:
         print("###UNBALANCED###")
         patient_was_unbalanced = True
         unbalanced = True
@@ -298,10 +308,7 @@ while cv2.waitKey(1) < 0:
     #annotated_image = draw_landmarks_on_image(rgb_frame.numpy_view(), detection_result, computed_cog, smoothed_cog, unbalanced, right_foot, left_foot)
     annotated_image = draw_landmarks_on_image(rgb_frame.numpy_view(), detection_result, smoothed_cog, unbalanced, right_foot, left_foot, smoothed_pos_right, smoothed_pos_left)
     cv2.namedWindow("Output", cv2.WINDOW_NORMAL)
-    cv2.namedWindow("Output2", cv2.WINDOW_NORMAL)
     cv2.imshow("Output", annotated_image)
-    cv2.imshow("Output2", frame2)
-    print(f"FRAME: {frame_counter}")
 
 vid.release()
 cv2.destroyAllWindows()
