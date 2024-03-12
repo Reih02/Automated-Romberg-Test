@@ -12,7 +12,7 @@ from filterpy.kalman import KalmanFilter
 import math
 
 
-video_path = 'captured_video/my_vid.MOV'
+video_path = 'captured_video/my_vid2.MOV'
 #other_vid = 'captured_video/weight.MOV'
 vid = cv2.VideoCapture(video_path)
 #vid2 = cv2.VideoCapture(other_vid)
@@ -184,8 +184,8 @@ def calculate_weight_distribution(rgb_image, cog, smoothed_pos_right, smoothed_p
     x_1 = math.sqrt((x_right - cog_x) ** 2)
     x_2 = math.sqrt((x_left - cog_x) ** 2)
 
-    N_1 = (85 * 9.81 * x_2 / (x_1 + x_2)) / 100
-    N_2 = (85 * 9.81 * x_1 / (x_1 + x_2)) / 100
+    N_1 = (MASS * 9.81 * x_2 / (x_1 + x_2)) / 100
+    N_2 = (MASS * 9.81 * x_1 / (x_1 + x_2)) / 100
 
     return (N_1, N_2)
   
@@ -226,7 +226,8 @@ def setup_kalman():
 base_options = python.BaseOptions(model_asset_path='pose_landmarker.task')
 options = vision.PoseLandmarkerOptions(
     base_options=base_options,
-    output_segmentation_masks=True)
+    running_mode=mp.tasks.vision.RunningMode.IMAGE)
+
 detector = vision.PoseLandmarker.create_from_options(options)
   
 # Init COG smoother class with defined alpha val
@@ -243,7 +244,9 @@ kf_r = setup_kalman()
 kf_l = setup_kalman()
 
 frame_counter = 0
-# Load the input frames from the video.
+
+MASS = int(input("Enter your weight in kilograms (kg): "))
+
 while cv2.waitKey(1) < 0:
   ret, frame = vid.read()
   #ret2, frame2 = vid2.read()
