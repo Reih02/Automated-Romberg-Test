@@ -12,7 +12,7 @@ from filterpy.kalman import KalmanFilter
 import math
 
 
-video_path = 'captured_video/my_vid2.MOV'
+video_path = 'captured_video/my_vid.MOV'
 #other_vid = 'captured_video/weight.MOV'
 vid = cv2.VideoCapture(video_path)
 #vid2 = cv2.VideoCapture(other_vid)
@@ -159,16 +159,6 @@ class SmoothCOG:
 # calculated centre of mass
 # https://physics.stackexchange.com/questions/805853/is-it-possible-to-calculate-the-weight-distribution-on-each-foot-from-the-centre/805861#805861
 def calculate_weight_distribution(rgb_image, cog, smoothed_pos_right, smoothed_pos_left):
-    
-    # used in order to avoid janky pose estimation changing the height of foot joint unexpectedly - triggering false positive
-    #average_y_coord = (smoothed_pos_right[1] + smoothed_pos_left[1]) / 2
-
-    # distance_right_foot = math.sqrt((smoothed_pos_right[0] - cog[0])**2 + (average_y_coord - cog[1])**2)
-    # distance_left_foot = math.sqrt((smoothed_pos_left[0] - cog[0])**2 + (average_y_coord - cog[1])**2)
-
-    # weight_distro_right = (1 / distance_right_foot) * (1 / (distance_right_foot + distance_left_foot)) * 100
-    # weight_distro_left = (1 / distance_left_foot) * (1 / (distance_right_foot + distance_left_foot)) * 100
-
     image = np.copy(rgb_image)
     _, width, _ = image.shape
 
@@ -181,11 +171,18 @@ def calculate_weight_distribution(rgb_image, cog, smoothed_pos_right, smoothed_p
     x_left = int(x_left * width)
     cog_x = int(cog_x * width)
     
+    
+      
     x_1 = math.sqrt((x_right - cog_x) ** 2)
     x_2 = math.sqrt((x_left - cog_x) ** 2)
 
-    N_1 = (MASS * 9.81 * x_2 / (x_1 + x_2)) / 100
-    N_2 = (MASS * 9.81 * x_1 / (x_1 + x_2)) / 100
+    if cog_x > x_left:
+      x_2 *= -1
+    if cog_x < x_right:
+      x_1 *= -1
+      
+    N_1 = ((MASS * 9.81 * x_2) / (x_1 + x_2)) / 100
+    N_2 = ((MASS * 9.81 * x_1) / (x_1 + x_2)) / 100
 
     return (N_1, N_2)
   
