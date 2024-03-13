@@ -99,7 +99,7 @@ def draw_landmarks_on_image(rgb_image, detection_result, computed_cog, unbalance
   return annotated_image
 
 # computes the weighted centre of gravity of subject + plots this on the image
-def compute_cog():
+def compute_cog(joint_locations):
   
   x_centre = 0
   y_centre = 0  
@@ -113,29 +113,41 @@ def compute_cog():
                                'right hip': 'LPT', 'left knee': 'thigh', 'right knee': 'thigh',
                                'left ankle': 'foot', 'right ankle': 'foot'}
   
-  with open('body_part_locations.txt', 'r') as file:
-    lines = file.readlines()[1:]
-    joint_locations = []
-    for line in lines:
-        parts = line.split(':')
-        body_part = parts[0].strip()
-        location_str = parts[1].strip()
-        coordinates = location_str[1:-1].split(',')
-        coordinates = tuple(float(coord.strip()) for coord in coordinates)
-        joint_locations.append((body_part, coordinates))
+  used_joints = 0
+  for body_part in joint_locations:
+    coordinates = joint_locations[body_part]
+    if body_part in bodyparts_classifications:
+      current_bodypart = bodyparts_classifications[body_part]
+      x_centre += (weights[current_bodypart] * coordinates[0])
+      y_centre += (weights[current_bodypart] * coordinates[1])
+      used_joints += weights[current_bodypart]
+  x_centre /= used_joints
+  y_centre /= used_joints
+  return (x_centre, y_centre)
+
+  # with open('body_part_locations.txt', 'r') as file:
+  #   lines = file.readlines()[1:]
+  #   joint_locations = []
+  #   for line in lines:
+  #       parts = line.split(':')
+  #       body_part = parts[0].strip()
+  #       location_str = parts[1].strip()
+  #       coordinates = location_str[1:-1].split(',')
+  #       coordinates = tuple(float(coord.strip()) for coord in coordinates)
+  #       joint_locations.append((body_part, coordinates))
         
     # iterate through the relevant joints and move the calculated centre of mass 
     # according to the joint location and the appropriate anatomical weight 
-    used_joints = 0
-    for i in range(0, len(joint_locations)):
-       if joint_locations[i][0] in bodyparts_classifications:
-         current_bodypart = bodyparts_classifications[joint_locations[i][0]]
-         x_centre += (weights[current_bodypart] * joint_locations[i][1][0])
-         y_centre += (weights[current_bodypart] * joint_locations[i][1][1])
-         used_joints += weights[current_bodypart]
-    x_centre /= used_joints
-    y_centre /= used_joints
-    return (x_centre, y_centre)
+    # used_joints = 0
+    # for i in range(0, len(joint_locations)):
+    #    if joint_locations[i][0] in bodyparts_classifications:
+    #      current_bodypart = bodyparts_classifications[joint_locations[i][0]]
+    #      x_centre += (weights[current_bodypart] * joint_locations[i][1][0])
+    #      y_centre += (weights[current_bodypart] * joint_locations[i][1][1])
+    #      used_joints += weights[current_bodypart]
+    # x_centre /= used_joints
+    # y_centre /= used_joints
+    # return (x_centre, y_centre)
   
 class SmoothCOG:
   def __init__(self, alpha):
@@ -294,65 +306,81 @@ while cv2.waitKey(1) < 0:
 
   pose_landmarks_list = detection_result.pose_landmarks
 
-  if len(pose_landmarks_list) > 0:
-    with open('body_part_locations.txt', 'w') as file:
-      file.write("Locations (xyz) grouped by body part\n")
-      for i in range(0,len(pose_landmarks_list[0])):
-          current_body_part = body_parts[i]
-          current_landmark = pose_landmarks_list[0][i]
-          current_location = (current_landmark.x, current_landmark.y, current_landmark.z)
-          file.write(f"{current_body_part}: {current_location}\n")
+  joint_locations_memory = {}
+  for body_part in body_parts:
+    joint_locations_memory[body_part] = None
 
-    computed_cog = compute_cog()
+  #print(pose_landmarks_list[0])
 
-    #smoothed_cog = data_smoother.smooth_data(computed_cog)
-    smoothed_cog = computed_cog
+  for i in range(0, len(pose_landmarks_list[0])):
+    current_body_part = body_parts[i]
+    current_landmark = pose_landmarks_list[0][i]
+    current_location = (current_landmark.x, current_landmark.y, current_landmark.z)
+    joint_locations_memory[current_body_part] = current_location
 
-    with open('body_part_locations.txt', 'r') as file:
-      lines = file.readlines()[-2:]
-      joint_locations = []
-      for line in lines:
-          parts = line.split(':')
-          body_part = parts[0].strip()
-          location_str = parts[1].strip()
-          coordinates = location_str[1:-1].split(',')
-          coordinates = tuple(float(coord.strip()) for coord in coordinates)
-          joint_locations.append(coordinates[0:2])
+  # if len(pose_landmarks_list) > 0:
+  #   with open('body_part_locations.txt', 'w') as file:
+  #     file.write("Locations (xyz) grouped by body part\n")
+  #     for i in range(0,len(pose_landmarks_list[0])):
+  #         current_body_part = body_parts[i]
+  #         current_landmark = pose_landmarks_list[0][i]
+  #         current_location = (current_landmark.x, current_landmark.y, current_landmark.z)
+  #         file.write(f"{current_body_part}: {current_location}\n")
 
-    left_foot, right_foot = joint_locations[0], joint_locations[1]
+  computed_cog = compute_cog(joint_locations_memory)
 
-    kf_r.predict()
-    kf_l.predict()
+  #smoothed_cog = data_smoother.smooth_data(computed_cog)
+  smoothed_cog = computed_cog
 
-    kf_r.update(right_foot)
-    kf_l.update(left_foot)
+    
 
-    smoothed_pos_right = (kf_r.x[0], kf_r.x[1])
-    smoothed_pos_left = (kf_l.x[0], kf_l.x[1])
+    # with open('body_part_locations.txt', 'r') as file:
+    #   lines = file.readlines()[-2:]
+    #   joint_locations = []
+    #   for line in lines:
+    #       parts = line.split(':')
+    #       body_part = parts[0].strip()
+    #       location_str = parts[1].strip()
+    #       coordinates = location_str[1:-1].split(',')
+    #       coordinates = tuple(float(coord.strip()) for coord in coordinates)
+    #       joint_locations.append(coordinates[0:2])
 
-    right_ratio, left_ratio = calculate_weight_distribution(rgb_frame.numpy_view(), smoothed_cog, smoothed_pos_right, smoothed_pos_left)
+    #print(joint_locations_memory)
 
-    print(f"Weight distribution difference is: {round(abs(right_ratio - left_ratio), 2)}%")
+  left_foot, right_foot = joint_locations_memory["left foot index"][0:2], joint_locations_memory["right foot index"][0:2]
 
-    if abs(right_ratio - left_ratio) > max_ratio_difference:
-      max_ratio_difference = abs(right_ratio - left_ratio)
+  kf_r.predict()
+  kf_l.predict()
 
-    # check if subject is "unbalanced" (ignore first 10 frames because of kalman filter initialisation)
-    if abs(right_ratio - left_ratio) > 6 and frame_counter >= 10:
-        print("###UNBALANCED###")
-        patient_was_unbalanced = True
-        unbalanced = True
-    else:
-      unbalanced_frame_counter = 0
-      unbalanced = False
+  kf_r.update(right_foot)
+  kf_l.update(left_foot)
 
-    #annotated_image = draw_landmarks_on_image(rgb_frame.numpy_view(), detection_result, computed_cog, smoothed_cog, unbalanced, right_foot, left_foot)
-    annotated_image = draw_landmarks_on_image(rgb_frame.numpy_view(), detection_result, smoothed_cog, unbalanced, right_foot, left_foot, smoothed_pos_right, smoothed_pos_left)
-    cv2.namedWindow("Output", cv2.WINDOW_NORMAL)
-    #cv2.namedWindow("Output2", cv2.WINDOW_NORMAL)
-    cv2.imshow("Output", annotated_image)
-    #cv2.imshow("Output2", frame2)
-    #print(f"FRAME: {frame_counter}")
+  smoothed_pos_right = (kf_r.x[0], kf_r.x[1])
+  smoothed_pos_left = (kf_l.x[0], kf_l.x[1])
+
+  right_ratio, left_ratio = calculate_weight_distribution(rgb_frame.numpy_view(), smoothed_cog, smoothed_pos_right, smoothed_pos_left)
+
+  print(f"Weight distribution difference is: {round(abs(right_ratio - left_ratio), 2)}%")
+
+  if abs(right_ratio - left_ratio) > max_ratio_difference:
+    max_ratio_difference = abs(right_ratio - left_ratio)
+
+  # check if subject is "unbalanced" (ignore first 10 frames because of kalman filter initialisation)
+  if abs(right_ratio - left_ratio) > 6 and frame_counter >= 10:
+      print("###UNBALANCED###")
+      patient_was_unbalanced = True
+      unbalanced = True
+  else:
+    unbalanced_frame_counter = 0
+    unbalanced = False
+
+  #annotated_image = draw_landmarks_on_image(rgb_frame.numpy_view(), detection_result, computed_cog, smoothed_cog, unbalanced, right_foot, left_foot)
+  annotated_image = draw_landmarks_on_image(rgb_frame.numpy_view(), detection_result, smoothed_cog, unbalanced, right_foot, left_foot, smoothed_pos_right, smoothed_pos_left)
+  cv2.namedWindow("Output", cv2.WINDOW_NORMAL)
+  #cv2.namedWindow("Output2", cv2.WINDOW_NORMAL)
+  cv2.imshow("Output", annotated_image)
+  #cv2.imshow("Output2", frame2)
+  #print(f"FRAME: {frame_counter}")
 
 vid.release()
 cv2.destroyAllWindows()
