@@ -54,37 +54,32 @@ body_parts = [
 ]
 
 
-def draw_landmarks_on_image(rgb_image, detection_result, computed_cog, unbalanced, right_foot, left_foot, smoothed_pos_right, smoothed_pos_left):
-  pose_landmarks_list = detection_result.pose_landmarks
+def draw_landmarks_on_image(rgb_image, x_1, x_2, computed_cog, unbalanced, right_foot, left_foot, smoothed_pos_right, smoothed_pos_left):
   annotated_image = np.copy(rgb_image)
-  # Loop through the detected poses to visualize.
-  for idx in range(len(pose_landmarks_list)):
-    pose_landmarks = pose_landmarks_list[idx]
-
-    # Draw the pose landmarks.
-    pose_landmarks_proto = landmark_pb2.NormalizedLandmarkList()
-    pose_landmarks_proto.landmark.extend([
-      landmark_pb2.NormalizedLandmark(x=landmark.x, y=landmark.y, z=landmark.z) for landmark in pose_landmarks
-    ])
-    solutions.drawing_utils.draw_landmarks(
-      annotated_image,
-      pose_landmarks_proto,
-      solutions.pose.POSE_CONNECTIONS,
-      solutions.drawing_styles.get_default_pose_landmarks_style())
   # draw COG
   height, width, _ = annotated_image.shape
   x_pixel_location = int(computed_cog[0] * width)
   y_pixel_location = int(computed_cog[1] * height)
   cv2.circle(annotated_image, (x_pixel_location, y_pixel_location), 10, (255, 0, 0), 2)
 
+  # draw smoothed foot joints
   smoothed_right_x, smoothed_right_y = int(smoothed_pos_right[0] * width), int(smoothed_pos_right[1] * height)
   smoothed_left_x, smoothed_left_y = int(smoothed_pos_left[0] * width), int(smoothed_pos_left[1] * height)
   cv2.circle(annotated_image, (smoothed_right_x, smoothed_right_y), 3, (0, 255, 0), 2)
   cv2.circle(annotated_image, (smoothed_left_x, smoothed_left_y), 3, (0, 255, 0), 2)
 
-  # draw lines between smoothed feed joint locations and COG
-  cv2.line(annotated_image, (smoothed_right_x, smoothed_right_y), (x_pixel_location, y_pixel_location), (0, 0, 255), 2)
-  cv2.line(annotated_image, (smoothed_left_x, smoothed_left_y), (x_pixel_location, y_pixel_location), (0, 0, 255), 2)
+  # draw lines between smoothed foot joint locations and COG
+#   cv2.line(annotated_image, (smoothed_right_x, smoothed_right_y), (x_pixel_location, y_pixel_location), (0, 0, 255), 2)
+#   cv2.line(annotated_image, (smoothed_left_x, smoothed_left_y), (x_pixel_location, y_pixel_location), (0, 0, 255), 2)
+
+  # draw lines between COG, feet, and x_1, x_2, to show physics calculations being done
+  cog_x1 = (int(x_pixel_location + x_1), y_pixel_location)
+  cog_x2 = (int(x_pixel_location - x_2), y_pixel_location)
+  
+  cv2.line(annotated_image, (x_pixel_location, y_pixel_location), cog_x1, (0, 0, 255), 2)
+  cv2.line(annotated_image, (x_pixel_location, y_pixel_location), cog_x2, (0, 0, 255), 2)
+  cv2.line(annotated_image, (smoothed_right_x, smoothed_right_y), cog_x2, (0, 0, 255), 2)
+  cv2.line(annotated_image, (smoothed_left_x, smoothed_left_y), cog_x1, (0, 0, 255), 2)
 
   # draw smoothed COG
   #smooth_x_pixel_location = int(smoothed_cog[0] * width)
@@ -196,7 +191,7 @@ def calculate_weight_distribution(rgb_image, cog, smoothed_pos_right, smoothed_p
     N_1 = ((MASS * 9.81 * x_2) / (x_1 + x_2)) / 100
     N_2 = ((MASS * 9.81 * x_1) / (x_1 + x_2)) / 100
 
-    return (N_1, N_2)
+    return (N_1, N_2, x_1, x_2)
   
 def setup_kalman():
   # Define Kalman Filter
@@ -229,6 +224,60 @@ def setup_kalman():
   return kf
 
 
+# # Create an ImageSegmenter object
+# segment_base_options = python.BaseOptions(model_asset_path='deeplab_v3.tflite')
+# segment_options = vision.ImageSegmenterOptions(base_options=segment_base_options,
+#                                        output_category_mask=True)
+
+# segmenter = vision.ImageSegmenter.create_from_options(segment_options)
+
+# # Create a PoseLandmarker object
+# detector_base_options = python.BaseOptions(model_asset_path='pose_landmarker_full.task')
+# detector_options = vision.PoseLandmarkerOptions(
+#     base_options=detector_base_options)
+
+# detector = vision.PoseLandmarker.create_from_options(detector_options)
+
+class PoseDetector:
+
+    def __init__(self, static_image_mode=False, model_complexity=1, smooth_landmarks=True,
+                 enable_segmentation=False, smooth_segmentation=False, min_detection_confidence=0.5,
+                 min_tracking_confidence=0.5):
+
+        self.static_image_mode = static_image_mode
+        self.model_complexity = model_complexity
+        self.smooth_landmarks = smooth_landmarks
+        self.enable_segmentation = enable_segmentation
+        self.smooth_segmentation = smooth_segmentation
+        self.min_detection_confidence = min_detection_confidence
+        self.min_tracking_confidence = min_tracking_confidence
+
+        self.results = None
+        self.joint_locations_memory = {}
+        for body_part in body_parts:
+            self.joint_locations_memory[body_part] = None
+
+        self.mpDraw = mp.solutions.drawing_utils
+        self.mpPose = mp.solutions.pose
+
+        self.pose = self.mpPose.Pose(static_image_mode, model_complexity, smooth_landmarks, enable_segmentation,
+                                     smooth_segmentation, min_detection_confidence, min_tracking_confidence)
+
+    def find_pose(self, img, draw=True):
+        img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+        self.results = self.pose.process(img_rgb)
+        if self.results.pose_landmarks:
+           if draw:
+              self.mpDraw.draw_landmarks(img, self.results.pose_landmarks, self.mpPose.POSE_CONNECTIONS)
+        return img
+
+    def get_position(self, img, draw=True):
+        if self.results.pose_landmarks:
+           for id, landmark in enumerate(self.results.pose_landmarks.landmark):
+              current_body_part = body_parts[id]
+              self.joint_locations_memory[current_body_part] = (landmark.x, landmark.y, landmark.z)
+        return self.joint_locations_memory
+
 # Create an ImageSegmenter object
 segment_base_options = python.BaseOptions(model_asset_path='deeplab_v3.tflite')
 segment_options = vision.ImageSegmenterOptions(base_options=segment_base_options,
@@ -236,13 +285,6 @@ segment_options = vision.ImageSegmenterOptions(base_options=segment_base_options
 
 segmenter = vision.ImageSegmenter.create_from_options(segment_options)
 
-# Create a PoseLandmarker object
-detector_base_options = python.BaseOptions(model_asset_path='pose_landmarker_full.task')
-detector_options = vision.PoseLandmarkerOptions(
-    base_options=detector_base_options)
-
-detector = vision.PoseLandmarker.create_from_options(detector_options)
-  
 # Init COG smoother class with defined alpha val
 alpha = 0.9
 data_smoother = SmoothCOG(alpha)
@@ -260,6 +302,8 @@ frame_counter = 0
 
 MASS = int(input("Enter your weight in kilograms (kg): "))
 
+pose_estimator = PoseDetector()
+
 while cv2.waitKey(1) < 0:
   ret, frame = vid.read()
   #ret2, frame2 = vid2.read()
@@ -268,14 +312,32 @@ while cv2.waitKey(1) < 0:
 
   frame_counter += 1
   
+  # Blur image to pre-process noise before feeding to CNNs
   kernel = (5, 5) # for use in gaussian blur
-  blurred_frame = cv2.GaussianBlur(frame, kernel, 0)
+  frame = cv2.GaussianBlur(frame, kernel, 0)
 
-  rgb_frame = mp.Image(image_format=mp.ImageFormat.SRGB, data=blurred_frame) # convert video frame to mp.Image type 
+  rgb_frame = mp.Image(image_format=mp.ImageFormat.SRGB, data=frame) # convert video frame to mp.Image type 
                                                                      # for processing in pose detector
-  ###
   segmentation_result = segmenter.segment(rgb_frame)
   category_mask = segmentation_result.category_mask
+
+  # Convert the BGR image to RGB
+  image_data = rgb_frame.numpy_view()
+
+  # Apply effects
+  blurred_image = cv2.GaussianBlur(image_data, (95,95), 0)
+
+  # assigns value to pixel depending on if it is part of human body or not
+  condition = np.stack((category_mask.numpy_view(),) * 3, axis=-1) > 0.1
+  output_image = np.where(condition, image_data, blurred_image)
+
+  img = pose_estimator.find_pose(output_image, draw=True)
+  landmark_list = pose_estimator.get_position(output_image, draw=False)
+
+  if len(landmark_list) == 0:
+     continue
+#   segmentation_result = segmenter.segment(rgb_frame)
+#   category_mask = segmentation_result.category_mask
 
   # # Generate solid color images for showing the output segmentation mask.
   # image_data = rgb_frame.numpy_view()
@@ -288,35 +350,9 @@ while cv2.waitKey(1) < 0:
   # output_image = np.where(condition, fg_image, bg_image)
 
   # Convert the BGR image to RGB
-  image_data = rgb_frame.numpy_view()
-
-  # Apply effects
-  blurred_image = cv2.GaussianBlur(image_data, (55,55), 0)
-
-  # assigns value to pixel depending on if it is part of human body or not
-  condition = np.stack((category_mask.numpy_view(),) * 3, axis=-1) > 0.1
-  output_image = np.where(condition, image_data, blurred_image)
-
-  cv2.namedWindow("Output3", cv2.WINDOW_NORMAL)
-  cv2.imshow("Output3", output_image)
-  ###
+  
   
   rgb_frame = mp.Image(image_format=mp.ImageFormat.SRGB, data=output_image)
-  detection_result = detector.detect(rgb_frame)
-
-  pose_landmarks_list = detection_result.pose_landmarks
-
-  joint_locations_memory = {}
-  for body_part in body_parts:
-    joint_locations_memory[body_part] = None
-
-  #print(pose_landmarks_list[0])
-
-  for i in range(0, len(pose_landmarks_list[0])):
-    current_body_part = body_parts[i]
-    current_landmark = pose_landmarks_list[0][i]
-    current_location = (current_landmark.x, current_landmark.y, current_landmark.z)
-    joint_locations_memory[current_body_part] = current_location
 
   # if len(pose_landmarks_list) > 0:
   #   with open('body_part_locations.txt', 'w') as file:
@@ -327,12 +363,11 @@ while cv2.waitKey(1) < 0:
   #         current_location = (current_landmark.x, current_landmark.y, current_landmark.z)
   #         file.write(f"{current_body_part}: {current_location}\n")
 
-  computed_cog = compute_cog(joint_locations_memory)
+  computed_cog = compute_cog(landmark_list)
 
   #smoothed_cog = data_smoother.smooth_data(computed_cog)
   smoothed_cog = computed_cog
 
-    
 
     # with open('body_part_locations.txt', 'r') as file:
     #   lines = file.readlines()[-2:]
@@ -347,7 +382,7 @@ while cv2.waitKey(1) < 0:
 
     #print(joint_locations_memory)
 
-  left_foot, right_foot = joint_locations_memory["left foot index"][0:2], joint_locations_memory["right foot index"][0:2]
+  left_foot, right_foot = landmark_list["left foot index"][0:2], landmark_list["right foot index"][0:2]
 
   kf_r.predict()
   kf_l.predict()
@@ -358,7 +393,7 @@ while cv2.waitKey(1) < 0:
   smoothed_pos_right = (kf_r.x[0], kf_r.x[1])
   smoothed_pos_left = (kf_l.x[0], kf_l.x[1])
 
-  right_ratio, left_ratio = calculate_weight_distribution(rgb_frame.numpy_view(), smoothed_cog, smoothed_pos_right, smoothed_pos_left)
+  right_ratio, left_ratio, x_1, x_2 = calculate_weight_distribution(rgb_frame.numpy_view(), smoothed_cog, smoothed_pos_right, smoothed_pos_left)
 
   print(f"Weight distribution difference is: {round(abs(right_ratio - left_ratio), 2)}%")
 
@@ -374,8 +409,8 @@ while cv2.waitKey(1) < 0:
     unbalanced_frame_counter = 0
     unbalanced = False
 
-  #annotated_image = draw_landmarks_on_image(rgb_frame.numpy_view(), detection_result, computed_cog, smoothed_cog, unbalanced, right_foot, left_foot)
-  annotated_image = draw_landmarks_on_image(rgb_frame.numpy_view(), detection_result, smoothed_cog, unbalanced, right_foot, left_foot, smoothed_pos_right, smoothed_pos_left)
+  #annotated_image = draw_landmarks_on_image(rgb_frame.numpy_view(), landmark_list, computed_cog, unbalanced, smoothed_cog, right_foot, left_foot)
+  annotated_image = draw_landmarks_on_image(rgb_frame.numpy_view(), x_1, x_2, smoothed_cog, unbalanced, right_foot, left_foot, smoothed_pos_right, smoothed_pos_left)
   cv2.namedWindow("Output", cv2.WINDOW_NORMAL)
   #cv2.namedWindow("Output2", cv2.WINDOW_NORMAL)
   cv2.imshow("Output", annotated_image)
