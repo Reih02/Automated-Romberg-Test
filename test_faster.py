@@ -97,7 +97,8 @@ def draw_landmarks_on_image(rgb_image, x_1, x_2, computed_cog, unbalanced, right
 def compute_cog(joint_locations):
   
   x_centre = 0
-  y_centre = 0  
+  y_centre = 0
+  z_centre = 0
 
   # hard-coded anatomically accurate joint weights w/ normalisation for use in later calculation
   weights = {'head': 0.0681/0.5336, 'UPT': 0.1571/0.5336, 'upper_arm': 0.0263/0.5336,
@@ -115,10 +116,12 @@ def compute_cog(joint_locations):
       current_bodypart = bodyparts_classifications[body_part]
       x_centre += (weights[current_bodypart] * coordinates[0])
       y_centre += (weights[current_bodypart] * coordinates[1])
+      z_centre += (weights[current_bodypart] * coordinates[2])
       used_joints += weights[current_bodypart]
   x_centre /= used_joints
   y_centre /= used_joints
-  return (x_centre, y_centre)
+  z_centre /= used_joints
+  return (x_centre, y_centre, z_centre)
 
   # with open('body_part_locations.txt', 'r') as file:
   #   lines = file.readlines()[1:]
@@ -149,6 +152,7 @@ class SmoothCOG:
     self.alpha = alpha
     self.smoothed_x = 0
     self.smoothed_y = 0
+    self.smoothed_z = 0
     self.used = False
   
   def smooth_data(self, current_cog):
@@ -156,16 +160,18 @@ class SmoothCOG:
       self.used = True
       self.smoothed_x = current_cog[0]
       self.smoothed_y = current_cog[1]
+      self.smoothed_z = current_cog[2]
     else:
       self.smoothed_x = self.alpha * current_cog[0] + (1 - self.alpha) * self.smoothed_x
       self.smoothed_y = self.alpha * current_cog[1] + (1 - self.alpha) * self.smoothed_y
+      self.smoothed_z = self.alpha * current_cog[2] + (1 - self.alpha) * self.smoothed_z
 
-    return (self.smoothed_x, self.smoothed_y)
+    return (self.smoothed_x, self.smoothed_y, self.smoothed_z)
   
 # Calculates how much relative weight is stored on each foot based on pose geometry and
 # calculated centre of mass
 # https://physics.stackexchange.com/questions/805853/is-it-possible-to-calculate-the-weight-distribution-on-each-foot-from-the-centre/805861#805861
-def calculate_weight_distribution(rgb_image, cog, smoothed_pos_right, smoothed_pos_left):
+def calculate_weight_distribution(rgb_image, cog, smoothed_pos_right, smoothed_pos_left, rfoot_z, lfoot_z):
     image = np.copy(rgb_image)
     _, width, _ = image.shape
 
@@ -191,7 +197,25 @@ def calculate_weight_distribution(rgb_image, cog, smoothed_pos_right, smoothed_p
     N_1 = ((MASS * 9.81 * x_2) / (x_1 + x_2)) / 100
     N_2 = ((MASS * 9.81 * x_1) / (x_1 + x_2)) / 100
 
-    return (N_1, N_2, x_1, x_2)
+    # Calculate weight distro in z-axis
+    z_average_foot = (rfoot_z + lfoot_z) / 2
+    com_z = cog[2]  # Z-coordinate of center of mass
+
+    z_diff = com_z / z_average_foot
+
+    
+
+
+
+
+
+    
+
+    
+
+
+
+    return (N_1, N_2, x_1, x_2, z_diff)
   
 def setup_kalman():
   # Define Kalman Filter
@@ -364,9 +388,8 @@ while cv2.waitKey(1) < 0:
   #         file.write(f"{current_body_part}: {current_location}\n")
 
   computed_cog = compute_cog(landmark_list)
-
-  #smoothed_cog = data_smoother.smooth_data(computed_cog)
-  smoothed_cog = computed_cog
+  smoothed_cog = data_smoother.smooth_data(computed_cog)
+  #smoothed_cog = computed_cog
 
 
     # with open('body_part_locations.txt', 'r') as file:
@@ -383,6 +406,7 @@ while cv2.waitKey(1) < 0:
     #print(joint_locations_memory)
 
   left_foot, right_foot = landmark_list["left foot index"][0:2], landmark_list["right foot index"][0:2]
+  lfoot_z, rfoot_z = landmark_list["left knee"][2], landmark_list["right knee"][2]
 
   kf_r.predict()
   kf_l.predict()
@@ -393,12 +417,17 @@ while cv2.waitKey(1) < 0:
   smoothed_pos_right = (kf_r.x[0], kf_r.x[1])
   smoothed_pos_left = (kf_l.x[0], kf_l.x[1])
 
-  right_ratio, left_ratio, x_1, x_2 = calculate_weight_distribution(rgb_frame.numpy_view(), smoothed_cog, smoothed_pos_right, smoothed_pos_left)
+  right_ratio, left_ratio, x_1, x_2, z_diff = calculate_weight_distribution(rgb_frame.numpy_view(), smoothed_cog, smoothed_pos_right, smoothed_pos_left, rfoot_z, lfoot_z)
 
   print(f"Weight distribution difference is: {round(abs(right_ratio - left_ratio), 2)}%")
 
   if abs(right_ratio - left_ratio) > max_ratio_difference:
     max_ratio_difference = abs(right_ratio - left_ratio)
+
+  print(f"Z-axis weight distribution is: {abs(round(z_diff, 2))}%")
+
+  if abs(z_diff) > 12 and frame_counter >= 10:
+     print("###UNBALANCED (Z)")
 
   # check if subject is "unbalanced" (ignore first 10 frames because of kalman filter initialisation)
   if abs(right_ratio - left_ratio) > 6 and frame_counter >= 10:
