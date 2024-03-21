@@ -218,12 +218,17 @@ def calculate_weight_distribution(rgb_image, cog, smoothed_pos_right, smoothed_p
     print("###")
 
     #z_diff = (com_z / z_average_foot) * 100 # get difference in z-direction as a percentage
-    z_diff = (abs(com_z - z_average_foot)) * 100 # get difference in z-direction as a percentage
+    #z_diff = (abs(com_z - z_average_foot)) * 100 # get difference in z-direction as a percentage
+    vert_dist_z = abs(cog[0] - ((rknee_z + lknee_z) / 2))
+    horiz_dist_z = abs(cog[2] - ((rknee_z + lknee_z) / 2))
+    theta_z = math.atan(horiz_dist_z / vert_dist_z) * 100 # z-axis angle between CoM and feet expressed as a percentage
+
+    print(f"ANGLE: {theta_z}")
 
     #print(f"com_z: {com_z}")
     #print(f"knee_z: {z_average_foot}")
 
-    return (N_1, N_2, x_1, x_2, z_diff)
+    return (N_1, N_2, x_1, x_2, theta_z)
   
 def setup_kalman():
   # Define Kalman Filter
