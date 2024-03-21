@@ -12,7 +12,7 @@ from filterpy.kalman import KalmanFilter
 import math
 import tensorflow as tf
 
-video_path = 'captured_video/my_vid.MOV'
+video_path = 'captured_video/front_view_lean.MOV'
 #other_vid = 'captured_video/weight.MOV'
 vid = cv2.VideoCapture(video_path)
 #vid2 = cv2.VideoCapture(other_vid)
@@ -54,7 +54,7 @@ body_parts = [
 ]
 
 
-def draw_landmarks_on_image(rgb_image, x_1, x_2, computed_cog, unbalanced, right_foot, left_foot, smoothed_pos_right, smoothed_pos_left):
+def draw_landmarks_on_image(rgb_image, x_1, x_2, computed_cog, unbalanced, right_foot, left_foot, smoothed_pos_right, smoothed_pos_left, rknee_z, lknee_z):
   annotated_image = np.copy(rgb_image)
   # draw COG
   height, width, _ = annotated_image.shape
@@ -78,8 +78,15 @@ def draw_landmarks_on_image(rgb_image, x_1, x_2, computed_cog, unbalanced, right
   
   cv2.line(annotated_image, (x_pixel_location, y_pixel_location), cog_x1, (0, 0, 255), 2)
   cv2.line(annotated_image, (x_pixel_location, y_pixel_location), cog_x2, (0, 0, 255), 2)
-  cv2.line(annotated_image, (smoothed_right_x, smoothed_right_y), cog_x2, (0, 0, 255), 2)
-  cv2.line(annotated_image, (smoothed_left_x, smoothed_left_y), cog_x1, (0, 0, 255), 2)
+  cv2.line(annotated_image, (smoothed_right_x, smoothed_right_y), (smoothed_right_x, cog_x2[1]), (0, 0, 255), 2)
+  cv2.line(annotated_image, (smoothed_left_x, smoothed_left_y), (smoothed_left_x, cog_x1[1]), (0, 0, 255), 2)
+
+  # draw lines between knees and cog to show z-axis weight distro calculation
+  rknee_pixel = ((int(rknee_z[0] * width)), int(rknee_z[1] * height))
+  lknee_pixel = ((int(lknee_z[0] * width)), int(lknee_z[1] * height))
+
+  cv2.line(annotated_image, rknee_pixel, (x_pixel_location, y_pixel_location), (255, 0, 0), 2)
+  cv2.line(annotated_image, lknee_pixel, (x_pixel_location, y_pixel_location), (255, 0, 0), 2)
 
   # draw smoothed COG
   #smooth_x_pixel_location = int(smoothed_cog[0] * width)
@@ -171,7 +178,7 @@ class SmoothCOG:
 # Calculates how much relative weight is stored on each foot based on pose geometry and
 # calculated centre of mass
 # https://physics.stackexchange.com/questions/805853/is-it-possible-to-calculate-the-weight-distribution-on-each-foot-from-the-centre/805861#805861
-def calculate_weight_distribution(rgb_image, cog, smoothed_pos_right, smoothed_pos_left, rfoot_z, lfoot_z):
+def calculate_weight_distribution(rgb_image, cog, smoothed_pos_right, smoothed_pos_left, rknee_z, lknee_z):
     image = np.copy(rgb_image)
     _, width, _ = image.shape
 
@@ -193,27 +200,28 @@ def calculate_weight_distribution(rgb_image, cog, smoothed_pos_right, smoothed_p
       x_2 *= -1
     if cog_x < x_right:
       x_1 *= -1
-      
+    
+    if (x_1 + x_2) == 0:
+       return (None, None, None, None, None)
+
     N_1 = ((MASS * 9.81 * x_2) / (x_1 + x_2)) / 100
     N_2 = ((MASS * 9.81 * x_1) / (x_1 + x_2)) / 100
 
     # Calculate weight distro in z-axis
-    z_average_foot = (rfoot_z + lfoot_z) / 2
+    z_average_foot = 0#(rknee_z + lknee_z) / 2
     com_z = cog[2]  # Z-coordinate of center of mass
 
-    z_diff = com_z / z_average_foot
+    print("Knees:")
+    print(rknee_z, lknee_z)
+    print("COM:")
+    print(com_z)
+    print("###")
 
-    
+    #z_diff = (com_z / z_average_foot) * 100 # get difference in z-direction as a percentage
+    z_diff = (abs(com_z - z_average_foot)) * 100 # get difference in z-direction as a percentage
 
-
-
-
-
-    
-
-    
-
-
+    #print(f"com_z: {com_z}")
+    #print(f"knee_z: {z_average_foot}")
 
     return (N_1, N_2, x_1, x_2, z_diff)
   
@@ -293,7 +301,9 @@ class PoseDetector:
         if self.results.pose_landmarks:
            if draw:
               self.mpDraw.draw_landmarks(img, self.results.pose_landmarks, self.mpPose.POSE_CONNECTIONS)
-        return img
+           return img
+        else:
+           return None
 
     def get_position(self, img, draw=True):
         if self.results.pose_landmarks:
@@ -406,7 +416,7 @@ while cv2.waitKey(1) < 0:
     #print(joint_locations_memory)
 
   left_foot, right_foot = landmark_list["left foot index"][0:2], landmark_list["right foot index"][0:2]
-  lfoot_z, rfoot_z = landmark_list["left knee"][2], landmark_list["right knee"][2]
+  lknee_z, rknee_z = landmark_list["left knee"], landmark_list["right knee"]
 
   kf_r.predict()
   kf_l.predict()
@@ -417,7 +427,9 @@ while cv2.waitKey(1) < 0:
   smoothed_pos_right = (kf_r.x[0], kf_r.x[1])
   smoothed_pos_left = (kf_l.x[0], kf_l.x[1])
 
-  right_ratio, left_ratio, x_1, x_2, z_diff = calculate_weight_distribution(rgb_frame.numpy_view(), smoothed_cog, smoothed_pos_right, smoothed_pos_left, rfoot_z, lfoot_z)
+  right_ratio, left_ratio, x_1, x_2, z_diff = calculate_weight_distribution(rgb_frame.numpy_view(), smoothed_cog, smoothed_pos_right, smoothed_pos_left, rknee_z[2], lknee_z[2])
+  if right_ratio == None:
+     continue
 
   print(f"Weight distribution difference is: {round(abs(right_ratio - left_ratio), 2)}%")
 
@@ -427,7 +439,7 @@ while cv2.waitKey(1) < 0:
   print(f"Z-axis weight distribution is: {abs(round(z_diff, 2))}%")
 
   if abs(z_diff) > 12 and frame_counter >= 10:
-     print("###UNBALANCED (Z)")
+     print("###UNBALANCED (Z)###")
 
   # check if subject is "unbalanced" (ignore first 10 frames because of kalman filter initialisation)
   if abs(right_ratio - left_ratio) > 6 and frame_counter >= 10:
@@ -439,7 +451,7 @@ while cv2.waitKey(1) < 0:
     unbalanced = False
 
   #annotated_image = draw_landmarks_on_image(rgb_frame.numpy_view(), landmark_list, computed_cog, unbalanced, smoothed_cog, right_foot, left_foot)
-  annotated_image = draw_landmarks_on_image(rgb_frame.numpy_view(), x_1, x_2, smoothed_cog, unbalanced, right_foot, left_foot, smoothed_pos_right, smoothed_pos_left)
+  annotated_image = draw_landmarks_on_image(rgb_frame.numpy_view(), x_1, x_2, smoothed_cog, unbalanced, right_foot, left_foot, smoothed_pos_right, smoothed_pos_left, rknee_z, lknee_z)
   cv2.namedWindow("Output", cv2.WINDOW_NORMAL)
   #cv2.namedWindow("Output2", cv2.WINDOW_NORMAL)
   cv2.imshow("Output", annotated_image)
