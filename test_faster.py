@@ -211,12 +211,6 @@ def calculate_weight_distribution(rgb_image, cog, smoothed_pos_right, smoothed_p
     z_average_foot = 0#(rknee_z + lknee_z) / 2
     com_z = cog[2]  # Z-coordinate of center of mass
 
-    print("Knees:")
-    print(rknee_z, lknee_z)
-    print("COM:")
-    print(com_z)
-    print("###")
-
     #z_diff = (com_z / z_average_foot) * 100 # get difference in z-direction as a percentage
     #z_diff = (abs(com_z - z_average_foot)) * 100 # get difference in z-direction as a percentage
     vert_dist_z = abs(cog[0] - ((rknee_z + lknee_z) / 2))
