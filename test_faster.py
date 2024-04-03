@@ -12,10 +12,10 @@ from filterpy.kalman import KalmanFilter
 import math
 import tensorflow as tf
 
-video_path = 'captured_video/front_view_lean.MOV'
-#other_vid = 'captured_video/weight.MOV'
+video_path = 'captured_video/subject_4_female.MOV'
+other_vid = 'captured_video/weights_4_female.MOV'
 vid = cv2.VideoCapture(video_path)
-#vid2 = cv2.VideoCapture(other_vid)
+vid2 = cv2.VideoCapture(other_vid)
 
 body_parts = [
     'nose',
@@ -213,8 +213,8 @@ def calculate_weight_distribution(rgb_image, cog, smoothed_pos_right, smoothed_p
 
     #z_diff = (com_z / z_average_foot) * 100 # get difference in z-direction as a percentage
     #z_diff = (abs(com_z - z_average_foot)) * 100 # get difference in z-direction as a percentage
-    vert_dist_z = abs(cog[0] - ((rknee_z + lknee_z) / 2))
-    horiz_dist_z = abs(cog[2] - ((rknee_z + lknee_z) / 2))
+    vert_dist_z = abs((MASS * 9.81 * cog[0]) - ((rknee_z + lknee_z) / 2))
+    horiz_dist_z = abs((MASS * 9.81 * cog[2]) - ((rknee_z + lknee_z) / 2))
     theta_z = math.atan(horiz_dist_z / vert_dist_z) * 100 # z-axis angle between CoM and feet expressed as a percentage
 
     print(f"ANGLE: {theta_z}")
@@ -337,9 +337,11 @@ MASS = int(input("Enter your weight in kilograms (kg): "))
 
 pose_estimator = PoseDetector()
 
+import time
 while cv2.waitKey(1) < 0:
+  time.sleep(0.5)
   ret, frame = vid.read()
-  #ret2, frame2 = vid2.read()
+  ret2, frame2 = vid2.read()
   if not ret:
     break
 
@@ -452,12 +454,13 @@ while cv2.waitKey(1) < 0:
   #annotated_image = draw_landmarks_on_image(rgb_frame.numpy_view(), landmark_list, computed_cog, unbalanced, smoothed_cog, right_foot, left_foot)
   annotated_image = draw_landmarks_on_image(rgb_frame.numpy_view(), x_1, x_2, smoothed_cog, unbalanced, right_foot, left_foot, smoothed_pos_right, smoothed_pos_left, rknee_z, lknee_z)
   cv2.namedWindow("Output", cv2.WINDOW_NORMAL)
-  #cv2.namedWindow("Output2", cv2.WINDOW_NORMAL)
+  cv2.namedWindow("Output2", cv2.WINDOW_NORMAL)
   cv2.imshow("Output", annotated_image)
-  #cv2.imshow("Output2", frame2)
-  #print(f"FRAME: {frame_counter}")
+  cv2.imshow("Output2", frame2)
+  print(f"FRAME: {frame_counter}")
 
 vid.release()
+vid2.release()
 cv2.destroyAllWindows()
 
 print(f"Max ratio difference: {max_ratio_difference}")
