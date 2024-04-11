@@ -12,10 +12,12 @@ from filterpy.kalman import KalmanFilter
 import math
 import tensorflow as tf
 
-video_path = 'captured_video/subject_4_female.MOV'
-other_vid = 'captured_video/weights_4_female.MOV'
+video_path = 'captured_video/my_vid.MOV'
+other_vid = 'captured_video/weights_1.MOV'
 vid = cv2.VideoCapture(video_path)
 vid2 = cv2.VideoCapture(other_vid)
+
+MODE = int(input("Enter '1' for front-view camera, or '2' for side-view camera: "))
 
 body_parts = [
     'nose',
@@ -60,13 +62,13 @@ def draw_landmarks_on_image(rgb_image, x_1, x_2, computed_cog, unbalanced, right
   height, width, _ = annotated_image.shape
   x_pixel_location = int(computed_cog[0] * width)
   y_pixel_location = int(computed_cog[1] * height)
-  cv2.circle(annotated_image, (x_pixel_location, y_pixel_location), 10, (255, 0, 0), 2)
+  cv2.circle(annotated_image, (x_pixel_location, y_pixel_location), 15, (0, 255, 0), 20)
 
   # draw smoothed foot joints
   smoothed_right_x, smoothed_right_y = int(smoothed_pos_right[0] * width), int(smoothed_pos_right[1] * height)
   smoothed_left_x, smoothed_left_y = int(smoothed_pos_left[0] * width), int(smoothed_pos_left[1] * height)
-  cv2.circle(annotated_image, (smoothed_right_x, smoothed_right_y), 3, (0, 255, 0), 2)
-  cv2.circle(annotated_image, (smoothed_left_x, smoothed_left_y), 3, (0, 255, 0), 2)
+  cv2.circle(annotated_image, (smoothed_right_x, smoothed_right_y), 3, (0, 255, 0), 6)
+  cv2.circle(annotated_image, (smoothed_left_x, smoothed_left_y), 3, (0, 255, 0), 6)
 
   # draw lines between smoothed foot joint locations and COG
 #   cv2.line(annotated_image, (smoothed_right_x, smoothed_right_y), (x_pixel_location, y_pixel_location), (0, 0, 255), 2)
@@ -76,17 +78,17 @@ def draw_landmarks_on_image(rgb_image, x_1, x_2, computed_cog, unbalanced, right
   cog_x1 = (int(x_pixel_location + x_1), y_pixel_location)
   cog_x2 = (int(x_pixel_location - x_2), y_pixel_location)
   
-  cv2.line(annotated_image, (x_pixel_location, y_pixel_location), cog_x1, (0, 0, 255), 2)
-  cv2.line(annotated_image, (x_pixel_location, y_pixel_location), cog_x2, (0, 0, 255), 2)
-  cv2.line(annotated_image, (smoothed_right_x, smoothed_right_y), (smoothed_right_x, cog_x2[1]), (0, 0, 255), 2)
-  cv2.line(annotated_image, (smoothed_left_x, smoothed_left_y), (smoothed_left_x, cog_x1[1]), (0, 0, 255), 2)
+  cv2.line(annotated_image, (x_pixel_location, y_pixel_location), cog_x1, (0, 0, 255), 6)
+  cv2.line(annotated_image, (x_pixel_location, y_pixel_location), cog_x2, (0, 0, 255), 6)
+  cv2.line(annotated_image, (smoothed_right_x, smoothed_right_y), (smoothed_right_x, cog_x2[1]), (0, 0, 255), 6)
+  cv2.line(annotated_image, (smoothed_left_x, smoothed_left_y), (smoothed_left_x, cog_x1[1]), (0, 0, 255), 6)
 
   # draw lines between knees and cog to show z-axis weight distro calculation
   rknee_pixel = ((int(rknee_z[0] * width)), int(rknee_z[1] * height))
   lknee_pixel = ((int(lknee_z[0] * width)), int(lknee_z[1] * height))
 
-  cv2.line(annotated_image, rknee_pixel, (x_pixel_location, y_pixel_location), (255, 0, 0), 2)
-  cv2.line(annotated_image, lknee_pixel, (x_pixel_location, y_pixel_location), (255, 0, 0), 2)
+  cv2.line(annotated_image, rknee_pixel, (x_pixel_location, y_pixel_location), (255, 0, 0), 6)
+  cv2.line(annotated_image, lknee_pixel, (x_pixel_location, y_pixel_location), (255, 0, 0), 6)
 
   # draw smoothed COG
   #smooth_x_pixel_location = int(smoothed_cog[0] * width)
@@ -217,12 +219,13 @@ def calculate_weight_distribution(rgb_image, cog, smoothed_pos_right, smoothed_p
     horiz_dist_z = abs((MASS * 9.81 * cog[2]) - ((rknee_z + lknee_z) / 2))
     theta_z = math.atan(horiz_dist_z / vert_dist_z) * 100 # z-axis angle between CoM and feet expressed as a percentage
 
-    print(f"ANGLE: {theta_z}")
+    horiz_component = MASS * theta_z
+    weight_distribution_z = ((MASS / 2) + abs(horiz_component)) / (((MASS / 2) + abs(horiz_component)) + ((MASS / 2) - abs(horiz_component)))
 
     #print(f"com_z: {com_z}")
     #print(f"knee_z: {z_average_foot}")
 
-    return (N_1, N_2, x_1, x_2, theta_z)
+    return (N_1, N_2, x_1, x_2, weight_distribution_z)
   
 def setup_kalman():
   # Define Kalman Filter
@@ -337,9 +340,7 @@ MASS = int(input("Enter your weight in kilograms (kg): "))
 
 pose_estimator = PoseDetector()
 
-import time
 while cv2.waitKey(1) < 0:
-  time.sleep(0.5)
   ret, frame = vid.read()
   ret2, frame2 = vid2.read()
   if not ret:
@@ -431,25 +432,34 @@ while cv2.waitKey(1) < 0:
   right_ratio, left_ratio, x_1, x_2, z_diff = calculate_weight_distribution(rgb_frame.numpy_view(), smoothed_cog, smoothed_pos_right, smoothed_pos_left, rknee_z[2], lknee_z[2])
   if right_ratio == None:
      continue
+  
+  if MODE == 1: # front-view
+    print(f"Weight distribution difference is: {round(abs(right_ratio - left_ratio), 2)}%")
 
-  print(f"Weight distribution difference is: {round(abs(right_ratio - left_ratio), 2)}%")
+    if abs(right_ratio - left_ratio) > max_ratio_difference:
+      max_ratio_difference = abs(right_ratio - left_ratio)
 
-  if abs(right_ratio - left_ratio) > max_ratio_difference:
-    max_ratio_difference = abs(right_ratio - left_ratio)
+    # check if subject is "unbalanced" (ignore first 10 frames because of kalman filter initialisation)
+    if abs(right_ratio - left_ratio) > 6 and frame_counter >= 10:
+        print("###UNBALANCED###")
+        patient_was_unbalanced = True
+        unbalanced = True
+    else:
+      unbalanced_frame_counter = 0
+      unbalanced = False
 
-  print(f"Z-axis weight distribution is: {abs(round(z_diff, 2))}%")
+  elif MODE == 2: # side-view
+    print(f"Z-axis weight distribution is: {abs(round(z_diff, 2))}%")
 
-  if abs(z_diff) > 12 and frame_counter >= 10:
-     print("###UNBALANCED (Z)###")
-
-  # check if subject is "unbalanced" (ignore first 10 frames because of kalman filter initialisation)
-  if abs(right_ratio - left_ratio) > 6 and frame_counter >= 10:
+    if abs(z_diff) > 12 and frame_counter >= 10:
       print("###UNBALANCED###")
       patient_was_unbalanced = True
       unbalanced = True
-  else:
-    unbalanced_frame_counter = 0
-    unbalanced = False
+    else:
+      unbalanced_frame_counter = 0
+      unbalanced = False
+
+  
 
   #annotated_image = draw_landmarks_on_image(rgb_frame.numpy_view(), landmark_list, computed_cog, unbalanced, smoothed_cog, right_foot, left_foot)
   annotated_image = draw_landmarks_on_image(rgb_frame.numpy_view(), x_1, x_2, smoothed_cog, unbalanced, right_foot, left_foot, smoothed_pos_right, smoothed_pos_left, rknee_z, lknee_z)
