@@ -6,8 +6,12 @@ from mediapipe.tasks import python
 from mediapipe.tasks.python import vision
 from filterpy.kalman import KalmanFilter
 import math
+import os
 
-video_path = 'captured_video/my_vid.MOV'
+
+SEGMENT_MODEL_PATH = os.path.dirname(os.path.abspath(__file__)) + '/deeplab_v3.tflite'
+video_path = os.path.dirname(os.path.abspath(__file__)) + '/downloaded_vids/subject_1.MOV'
+
 vid = cv2.VideoCapture(video_path)
 
 MODE = int(input("Enter '1' for front-view camera, or '2' for side-view camera: "))
@@ -113,7 +117,7 @@ def compute_cog(joint_locations):
   y_centre /= used_joints
   z_centre /= used_joints
   return (x_centre, y_centre, z_centre)
-
+  
 
 class SmoothCOG:
   def __init__(self, alpha):
@@ -166,10 +170,6 @@ def calculate_weight_distribution(rgb_image, cog, smoothed_pos_right, smoothed_p
     N_1 = ((MASS * 9.81 * x_2) / (x_1 + x_2)) / 100
     N_2 = ((MASS * 9.81 * x_1) / (x_1 + x_2)) / 100
 
-    # Calculate weight distro in z-axis
-    z_average_foot = 0
-    com_z = cog[2]  # Z-coordinate of center of mass
-
     vert_dist_z = abs((MASS * 9.81 * cog[0]) - ((rknee_z + lknee_z) / 2))
     horiz_dist_z = abs((MASS * 9.81 * cog[2]) - ((rknee_z + lknee_z) / 2))
     theta_z = math.atan(horiz_dist_z / vert_dist_z) * 100 # z-axis angle between CoM and feet expressed as a percentage
@@ -179,6 +179,7 @@ def calculate_weight_distribution(rgb_image, cog, smoothed_pos_right, smoothed_p
 
     return (N_1, N_2, x_1, x_2, weight_distribution_z)
   
+
 def setup_kalman():
   # Define Kalman Filter
   kf = KalmanFilter(dim_x=4, dim_z=2)
@@ -211,7 +212,6 @@ def setup_kalman():
 
 
 class PoseDetector:
-
     def __init__(self, static_image_mode=False, model_complexity=1, smooth_landmarks=True,
                  enable_segmentation=False, smooth_segmentation=False, min_detection_confidence=0.5,
                  min_tracking_confidence=0.5):
@@ -253,7 +253,7 @@ class PoseDetector:
         return self.joint_locations_memory
 
 # Create an ImageSegmenter object
-segment_base_options = python.BaseOptions(model_asset_path='deeplab_v3.tflite')
+segment_base_options = python.BaseOptions(model_asset_path=SEGMENT_MODEL_PATH)
 segment_options = vision.ImageSegmenterOptions(base_options=segment_base_options,
                                        output_category_mask=True)
 
@@ -311,7 +311,6 @@ while cv2.waitKey(1) < 0:
      continue
   
   rgb_frame = mp.Image(image_format=mp.ImageFormat.SRGB, data=output_image)
-
   computed_cog = compute_cog(landmark_list)
   smoothed_cog = data_smoother.smooth_data(computed_cog)
 
@@ -334,10 +333,9 @@ while cv2.waitKey(1) < 0:
   if MODE == 1: # front-view
     print(f"Weight distribution difference is: {round(abs(right_ratio - left_ratio), 2)}%")
 
-    if frame_counter >= 10:
-      if abs(right_ratio - left_ratio) > max_ratio_difference:
-        max_ratio_difference = abs(right_ratio - left_ratio)
-        
+    if abs(right_ratio - left_ratio) > max_ratio_difference and frame_counter >= 10:
+      max_ratio_difference = abs(right_ratio - left_ratio)
+
     # check if subject is "unbalanced" (ignore first 10 frames because of kalman filter initialisation)
     if abs(right_ratio - left_ratio) > 6 and frame_counter >= 10:
         print("###UNBALANCED###")
@@ -358,10 +356,10 @@ while cv2.waitKey(1) < 0:
       unbalanced_frame_counter = 0
       unbalanced = False
 
-  #annotated_image = draw_landmarks_on_image(rgb_frame.numpy_view(), landmark_list, computed_cog, unbalanced, smoothed_cog, right_foot, left_foot)
   annotated_image = draw_landmarks_on_image(rgb_frame.numpy_view(), x_1, x_2, smoothed_cog, unbalanced, right_foot, left_foot, smoothed_pos_right, smoothed_pos_left, rknee_z, lknee_z)
   cv2.namedWindow("Output", cv2.WINDOW_NORMAL)
   cv2.imshow("Output", annotated_image)
+  print(f"FRAME: {frame_counter}")
 
 vid.release()
 cv2.destroyAllWindows()
