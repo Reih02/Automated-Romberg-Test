@@ -8,9 +8,7 @@ from filterpy.kalman import KalmanFilter
 import math
 
 video_path = 'captured_video/my_vid.MOV'
-other_vid = 'captured_video/weights.MOV'
 vid = cv2.VideoCapture(video_path)
-vid2 = cv2.VideoCapture(other_vid)
 
 MODE = int(input("Enter '1' for front-view camera, or '2' for side-view camera: "))
 
@@ -49,7 +47,6 @@ body_parts = [
     'left foot index',
     'right foot index'
 ]
-
 
 def draw_landmarks_on_image(rgb_image, x_1, x_2, computed_cog, unbalanced, right_foot, left_foot, smoothed_pos_right, smoothed_pos_left, rknee_z, lknee_z):
   annotated_image = np.copy(rgb_image)
@@ -142,7 +139,6 @@ class SmoothCOG:
 
 # Calculates how much relative weight is stored on each foot based on pose geometry and
 # calculated centre of mass
-# https://physics.stackexchange.com/questions/805853/is-it-possible-to-calculate-the-weight-distribution-on-each-foot-from-the-centre/805861#805861
 def calculate_weight_distribution(rgb_image, cog, smoothed_pos_right, smoothed_pos_left, rknee_z, lknee_z):
     image = np.copy(rgb_image)
     _, width, _ = image.shape
@@ -155,8 +151,6 @@ def calculate_weight_distribution(rgb_image, cog, smoothed_pos_right, smoothed_p
     x_right = int(x_right * width)
     x_left = int(x_left * width)
     cog_x = int(cog_x * width)
-    
-    
       
     x_1 = math.sqrt((x_right - cog_x) ** 2)
     x_2 = math.sqrt((x_left - cog_x) ** 2)
@@ -173,7 +167,7 @@ def calculate_weight_distribution(rgb_image, cog, smoothed_pos_right, smoothed_p
     N_2 = ((MASS * 9.81 * x_1) / (x_1 + x_2)) / 100
 
     # Calculate weight distro in z-axis
-    z_average_foot = 0#(rknee_z + lknee_z) / 2
+    z_average_foot = 0
     com_z = cog[2]  # Z-coordinate of center of mass
 
     vert_dist_z = abs((MASS * 9.81 * cog[0]) - ((rknee_z + lknee_z) / 2))
@@ -286,7 +280,6 @@ pose_estimator = PoseDetector()
 
 while cv2.waitKey(1) < 0:
   ret, frame = vid.read()
-  ret2, frame2 = vid2.read()
   if not ret:
     break
 
@@ -367,13 +360,9 @@ while cv2.waitKey(1) < 0:
   #annotated_image = draw_landmarks_on_image(rgb_frame.numpy_view(), landmark_list, computed_cog, unbalanced, smoothed_cog, right_foot, left_foot)
   annotated_image = draw_landmarks_on_image(rgb_frame.numpy_view(), x_1, x_2, smoothed_cog, unbalanced, right_foot, left_foot, smoothed_pos_right, smoothed_pos_left, rknee_z, lknee_z)
   cv2.namedWindow("Output", cv2.WINDOW_NORMAL)
-  cv2.namedWindow("Output2", cv2.WINDOW_NORMAL)
   cv2.imshow("Output", annotated_image)
-  cv2.imshow("Output2", frame2)
-  print(f"FRAME: {frame_counter}")
 
 vid.release()
-vid2.release()
 cv2.destroyAllWindows()
 
 print(f"Max ratio difference: {max_ratio_difference}")
