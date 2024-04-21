@@ -334,9 +334,10 @@ while cv2.waitKey(1) < 0:
   if MODE == 1: # front-view
     print(f"Weight distribution difference is: {round(abs(right_ratio - left_ratio), 2)}%")
 
-    if abs(right_ratio - left_ratio) > max_ratio_difference:
-      max_ratio_difference = abs(right_ratio - left_ratio)
-
+    if frame_counter >= 10:
+      if abs(right_ratio - left_ratio) > max_ratio_difference:
+        max_ratio_difference = abs(right_ratio - left_ratio)
+        
     # check if subject is "unbalanced" (ignore first 10 frames because of kalman filter initialisation)
     if abs(right_ratio - left_ratio) > 6 and frame_counter >= 10:
         print("###UNBALANCED###")
