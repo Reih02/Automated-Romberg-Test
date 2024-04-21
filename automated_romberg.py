@@ -1,19 +1,14 @@
 import cv2
-
-from mediapipe import solutions
-from mediapipe.framework.formats import landmark_pb2
 import numpy as np
-import matplotlib.image as mpimg
 from matplotlib.pyplot import imshow
 import mediapipe as mp
 from mediapipe.tasks import python
 from mediapipe.tasks.python import vision
 from filterpy.kalman import KalmanFilter
 import math
-import tensorflow as tf
 
 video_path = 'captured_video/my_vid.MOV'
-other_vid = 'captured_video/weights_1.MOV'
+other_vid = 'captured_video/weights.MOV'
 vid = cv2.VideoCapture(video_path)
 vid2 = cv2.VideoCapture(other_vid)
 
@@ -70,10 +65,6 @@ def draw_landmarks_on_image(rgb_image, x_1, x_2, computed_cog, unbalanced, right
   cv2.circle(annotated_image, (smoothed_right_x, smoothed_right_y), 3, (0, 255, 0), 6)
   cv2.circle(annotated_image, (smoothed_left_x, smoothed_left_y), 3, (0, 255, 0), 6)
 
-  # draw lines between smoothed foot joint locations and COG
-#   cv2.line(annotated_image, (smoothed_right_x, smoothed_right_y), (x_pixel_location, y_pixel_location), (0, 0, 255), 2)
-#   cv2.line(annotated_image, (smoothed_left_x, smoothed_left_y), (x_pixel_location, y_pixel_location), (0, 0, 255), 2)
-
   # draw lines between COG, feet, and x_1, x_2, to show physics calculations being done
   cog_x1 = (int(x_pixel_location + x_1), y_pixel_location)
   cog_x2 = (int(x_pixel_location - x_2), y_pixel_location)
@@ -90,17 +81,11 @@ def draw_landmarks_on_image(rgb_image, x_1, x_2, computed_cog, unbalanced, right
   cv2.line(annotated_image, rknee_pixel, (x_pixel_location, y_pixel_location), (255, 0, 0), 6)
   cv2.line(annotated_image, lknee_pixel, (x_pixel_location, y_pixel_location), (255, 0, 0), 6)
 
-  # draw smoothed COG
-  #smooth_x_pixel_location = int(smoothed_cog[0] * width)
-  #smooth_y_pixel_location = int(smoothed_cog[1] * height)
-  #cv2.circle(annotated_image, (smooth_x_pixel_location, smooth_y_pixel_location), 15, (0, 0, 255), 2)
-
   if unbalanced:
     cv2.circle(annotated_image, (50, 50), 5, (0, 0, 255), 5)
 
-  
-
   return annotated_image
+
 
 # computes the weighted centre of gravity of subject + plots this on the image
 def compute_cog(joint_locations):
@@ -132,30 +117,7 @@ def compute_cog(joint_locations):
   z_centre /= used_joints
   return (x_centre, y_centre, z_centre)
 
-  # with open('body_part_locations.txt', 'r') as file:
-  #   lines = file.readlines()[1:]
-  #   joint_locations = []
-  #   for line in lines:
-  #       parts = line.split(':')
-  #       body_part = parts[0].strip()
-  #       location_str = parts[1].strip()
-  #       coordinates = location_str[1:-1].split(',')
-  #       coordinates = tuple(float(coord.strip()) for coord in coordinates)
-  #       joint_locations.append((body_part, coordinates))
-        
-    # iterate through the relevant joints and move the calculated centre of mass 
-    # according to the joint location and the appropriate anatomical weight 
-    # used_joints = 0
-    # for i in range(0, len(joint_locations)):
-    #    if joint_locations[i][0] in bodyparts_classifications:
-    #      current_bodypart = bodyparts_classifications[joint_locations[i][0]]
-    #      x_centre += (weights[current_bodypart] * joint_locations[i][1][0])
-    #      y_centre += (weights[current_bodypart] * joint_locations[i][1][1])
-    #      used_joints += weights[current_bodypart]
-    # x_centre /= used_joints
-    # y_centre /= used_joints
-    # return (x_centre, y_centre)
-  
+
 class SmoothCOG:
   def __init__(self, alpha):
     self.alpha = alpha
@@ -177,6 +139,7 @@ class SmoothCOG:
 
     return (self.smoothed_x, self.smoothed_y, self.smoothed_z)
   
+
 # Calculates how much relative weight is stored on each foot based on pose geometry and
 # calculated centre of mass
 # https://physics.stackexchange.com/questions/805853/is-it-possible-to-calculate-the-weight-distribution-on-each-foot-from-the-centre/805861#805861
@@ -213,17 +176,12 @@ def calculate_weight_distribution(rgb_image, cog, smoothed_pos_right, smoothed_p
     z_average_foot = 0#(rknee_z + lknee_z) / 2
     com_z = cog[2]  # Z-coordinate of center of mass
 
-    #z_diff = (com_z / z_average_foot) * 100 # get difference in z-direction as a percentage
-    #z_diff = (abs(com_z - z_average_foot)) * 100 # get difference in z-direction as a percentage
     vert_dist_z = abs((MASS * 9.81 * cog[0]) - ((rknee_z + lknee_z) / 2))
     horiz_dist_z = abs((MASS * 9.81 * cog[2]) - ((rknee_z + lknee_z) / 2))
     theta_z = math.atan(horiz_dist_z / vert_dist_z) * 100 # z-axis angle between CoM and feet expressed as a percentage
 
     horiz_component = MASS * theta_z
     weight_distribution_z = ((MASS / 2) + abs(horiz_component)) / (((MASS / 2) + abs(horiz_component)) + ((MASS / 2) - abs(horiz_component)))
-
-    #print(f"com_z: {com_z}")
-    #print(f"knee_z: {z_average_foot}")
 
     return (N_1, N_2, x_1, x_2, weight_distribution_z)
   
@@ -257,20 +215,6 @@ def setup_kalman():
 
   return kf
 
-
-# # Create an ImageSegmenter object
-# segment_base_options = python.BaseOptions(model_asset_path='deeplab_v3.tflite')
-# segment_options = vision.ImageSegmenterOptions(base_options=segment_base_options,
-#                                        output_category_mask=True)
-
-# segmenter = vision.ImageSegmenter.create_from_options(segment_options)
-
-# # Create a PoseLandmarker object
-# detector_base_options = python.BaseOptions(model_asset_path='pose_landmarker_full.task')
-# detector_options = vision.PoseLandmarkerOptions(
-#     base_options=detector_base_options)
-
-# detector = vision.PoseLandmarker.create_from_options(detector_options)
 
 class PoseDetector:
 
@@ -372,50 +316,11 @@ while cv2.waitKey(1) < 0:
 
   if len(landmark_list) == 0:
      continue
-#   segmentation_result = segmenter.segment(rgb_frame)
-#   category_mask = segmentation_result.category_mask
-
-  # # Generate solid color images for showing the output segmentation mask.
-  # image_data = rgb_frame.numpy_view()
-  # fg_image = np.zeros(image_data.shape, dtype=np.uint8)
-  # fg_image[:] = (255, 255, 255) # white
-  # bg_image = np.zeros(image_data.shape, dtype=np.uint8)
-  # bg_image[:] = (192, 192, 192) # gray
-
-  # condition = np.stack((category_mask.numpy_view(),) * 3, axis=-1) > 0.2
-  # output_image = np.where(condition, fg_image, bg_image)
-
-  # Convert the BGR image to RGB
-  
   
   rgb_frame = mp.Image(image_format=mp.ImageFormat.SRGB, data=output_image)
 
-  # if len(pose_landmarks_list) > 0:
-  #   with open('body_part_locations.txt', 'w') as file:
-  #     file.write("Locations (xyz) grouped by body part\n")
-  #     for i in range(0,len(pose_landmarks_list[0])):
-  #         current_body_part = body_parts[i]
-  #         current_landmark = pose_landmarks_list[0][i]
-  #         current_location = (current_landmark.x, current_landmark.y, current_landmark.z)
-  #         file.write(f"{current_body_part}: {current_location}\n")
-
   computed_cog = compute_cog(landmark_list)
   smoothed_cog = data_smoother.smooth_data(computed_cog)
-  #smoothed_cog = computed_cog
-
-
-    # with open('body_part_locations.txt', 'r') as file:
-    #   lines = file.readlines()[-2:]
-    #   joint_locations = []
-    #   for line in lines:
-    #       parts = line.split(':')
-    #       body_part = parts[0].strip()
-    #       location_str = parts[1].strip()
-    #       coordinates = location_str[1:-1].split(',')
-    #       coordinates = tuple(float(coord.strip()) for coord in coordinates)
-    #       joint_locations.append(coordinates[0:2])
-
-    #print(joint_locations_memory)
 
   left_foot, right_foot = landmark_list["left foot index"][0:2], landmark_list["right foot index"][0:2]
   lknee_z, rknee_z = landmark_list["left knee"], landmark_list["right knee"]
@@ -458,8 +363,6 @@ while cv2.waitKey(1) < 0:
     else:
       unbalanced_frame_counter = 0
       unbalanced = False
-
-  
 
   #annotated_image = draw_landmarks_on_image(rgb_frame.numpy_view(), landmark_list, computed_cog, unbalanced, smoothed_cog, right_foot, left_foot)
   annotated_image = draw_landmarks_on_image(rgb_frame.numpy_view(), x_1, x_2, smoothed_cog, unbalanced, right_foot, left_foot, smoothed_pos_right, smoothed_pos_left, rknee_z, lknee_z)
